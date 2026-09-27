@@ -3,8 +3,9 @@
 Every constant below matches the live TradingView indicator's inputs.
 If the indicator's defaults ever change, update PARAMS here to match.
 """
+import math
 from bisect import bisect_right
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 PARAMS = dict(
     struct_lookback=14,     # HBC/LBC body-close structure lookback
@@ -26,10 +27,18 @@ def _parse_time(t: str) -> datetime:
 
 
 def _ema_series(closes: list[float], length: int) -> list[float]:
+    """EMA matching Pine's ta.ema: seeded with the SMA of the first `length`
+    bars (not the first close), NaN before that seed point.
+    """
+    n = len(closes)
+    out = [float("nan")] * n
+    if n < length:
+        return out
+    seed = sum(closes[:length]) / length
+    out[length - 1] = seed
     k = 2 / (length + 1)
-    out = [closes[0]]
-    for c in closes[1:]:
-        out.append(c * k + out[-1] * (1 - k))
+    for i in range(length, n):
+        out[i] = closes[i] * k + out[i - 1] * (1 - k)
     return out
 
 
@@ -48,14 +57,16 @@ def _atr14(candles: list[dict]) -> list[float]:
 def _htf_bias_lookup(m15: list[dict], h1: list[dict], htf_ema: list[float]) -> list[float]:
     """For each M15 bar, the most recently CONFIRMED H1 EMA value at/just before it.
 
-    Mirrors Pine's request.security(..., lookahead_off): a still-forming H1 bar
-    is never used, only the last fully-closed one.
+    OANDA (like Pine) timestamps a candle by its OPEN time, so an H1 bar isn't
+    actually closed/confirmed until open_time + 1h. Mirrors Pine's
+    request.security(..., lookahead_off), which only ever exposes an H1 bar's
+    value from its close onward — never while it's still forming.
     """
-    h1_times = [_parse_time(c["time"]) for c in h1]
+    h1_close_times = [_parse_time(c["time"]) + timedelta(hours=1) for c in h1]
     out = []
     for bar in m15:
         t = _parse_time(bar["time"])
-        idx = bisect_right(h1_times, t) - 1
+        idx = bisect_right(h1_close_times, t) - 1
         out.append(htf_ema[idx] if idx >= 0 else float("nan"))
     return out
 
@@ -97,7 +108,7 @@ def run_engine(pair: str, m15: list[dict], h1: list[dict], pip_size: float) -> d
             hbc = max(closes[i - pl:i])
             lbc = min(closes[i - pl:i])
             htf = htf_bias[i]
-            if htf == htf:  # not NaN
+            if not math.isnan(htf):
                 if closes[i] > hbc and closes[i] > htf:
                     trend = 1
                 if closes[i] < lbc and closes[i] < htf:
