@@ -1,0 +1,44 @@
+name: Nowick FX Scan
+
+on:
+  schedule:
+    # Every 15 minutes, 24/7 — aligned to candle closes.
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}  # allows manual "Run workflow" button for testing
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nowick-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scanner
+        env:
+          OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
+          OANDA_ENV: ${{ secrets.OANDA_ENV }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name "nowick-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state.json
+          git diff --quiet --cached || git commit -m "state update [skip ci]"
+          git push
