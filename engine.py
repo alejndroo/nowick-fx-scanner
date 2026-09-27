@@ -215,6 +215,17 @@ def run_engine(pair: str, m15: list[dict], h1: list[dict], pip_size: float, seed
     if watch_dir != 0:
         pending = {"dir": "BUY" if watch_dir == 1 else "SELL", "level": watch_level, "bars_left": watch_bars_left}
 
+    # seeded_through must be monotonic. A bad/stale OANDA fetch (transient
+    # outage, truncated response, cached data) could otherwise hand us a
+    # last-bar time EARLIER than what we already persisted, which would
+    # silently rewind the seed and re-walk already-applied bars next run —
+    # corrupting trend/swing/watch state without raising any error.
+    candidate_through = m15[-1]["time"] if n > 0 else None
+    if seed and seed.get("seeded_through") and (candidate_through is None or candidate_through < seed["seeded_through"]):
+        new_seeded_through = seed["seeded_through"]
+    else:
+        new_seeded_through = candidate_through if candidate_through is not None else (seed["seeded_through"] if seed else None)
+
     new_seed = {
         "trend": trend,
         "swing_low": swing_low,
@@ -222,7 +233,7 @@ def run_engine(pair: str, m15: list[dict], h1: list[dict], pip_size: float, seed
         "watch_dir": watch_dir,
         "watch_level": watch_level,
         "watch_bars_left": watch_bars_left,
-        "seeded_through": m15[-1]["time"] if n > 0 else (seed["seeded_through"] if seed else None),
+        "seeded_through": new_seeded_through,
     }
 
     return {"trend": trend, "pending": pending, "signals": signals, "state": new_seed}

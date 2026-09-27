@@ -22,6 +22,7 @@ STATE_PATH = os.path.join(os.path.dirname(__file__), "state.json")
 DEFAULT_STATE = {
     "paused": False, "last_alert": {}, "pairs": {}, "history": [],
     "last_update_id": None, "consecutive_full_failures": 0, "outage_alerted": False,
+    "engine_state": {}, "pair_failures": {}, "pair_failure_alerted": {},
 }
 
 # Signals older than this are treated as stale catch-up (e.g. after a long
@@ -52,6 +53,24 @@ def decimals_for(pair: str) -> int:
     return 3 if pair.endswith("JPY") else 5
 
 
+def reset_pair(state: dict, pair: str) -> None:
+    """Clear a pair's engine seed AND advance its alert-dedupe marker together.
+
+    engine_state[pair] and last_alert[pair] are coupled: engine_state decides
+    which bars get REPLAYED, last_alert decides which resulting signals get
+    RE-SENT to Telegram. Clearing one without the other either corrupts state
+    silently or re-sends already-seen signals as a burst (this happened once
+    during development — see git history around "Clear stale engine_state").
+    Always go through this helper to reset a pair, never edit state.json by
+    hand.
+    """
+    state.setdefault("engine_state", {}).pop(pair, None)
+    # Match OANDA's own timestamp format ("...Z" suffix, not "+00:00") so
+    # later string comparisons against signal times stay well-defined.
+    now_marker = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    state.setdefault("last_alert", {})[pair] = now_marker
+
+
 def main() -> None:
     state = load_state()
 
@@ -75,9 +94,12 @@ def main() -> None:
     pairs_snapshot = state.setdefault("pairs", {})
     history = state.setdefault("history", [])
     engine_state = state.setdefault("engine_state", {})
+    pair_failures = state.setdefault("pair_failures", {})
+    pair_failure_alerted = state.setdefault("pair_failure_alerted", {})
 
     now = datetime.now(timezone.utc)
     ok_count = 0
+    PAIR_FAILURE_THRESHOLD = 4  # ~1 hour of consecutive misses for one specific pair
 
     for pair in PAIRS:
         try:
@@ -97,6 +119,13 @@ def main() -> None:
             pairs_snapshot[pair] = {"trend": result["trend"], "pending": result["pending"]}
             engine_state[pair] = result["state"]
             ok_count += 1
+            pair_failures[pair] = 0
+            if pair_failure_alerted.get(pair):
+                pair_failure_alerted[pair] = False
+                try:
+                    telegram.send(f"✅ {display_symbol(pair)} scanning resumed normally.")
+                except Exception:
+                    pass
 
             last_seen = last_alert.get(pair)
             new_signals = [s for s in result["signals"] if last_seen is None or s["time"] > last_seen]
@@ -120,6 +149,14 @@ def main() -> None:
 
         except Exception:
             print(f"Error processing {pair}:", traceback.format_exc(), file=sys.stderr)
+            pair_failures[pair] = pair_failures.get(pair, 0) + 1
+            if pair_failures[pair] >= PAIR_FAILURE_THRESHOLD and not pair_failure_alerted.get(pair):
+                pair_failure_alerted[pair] = True
+                try:
+                    telegram.send(f"⚠️ {display_symbol(pair)} has failed {pair_failures[pair]} scans in a row "
+                                  f"— it will stop producing signals until this clears (check GitHub Actions logs).")
+                except Exception:
+                    pass
             continue
 
     # ---- sustained-failure watchdog: tell the user if the bot has gone dark ----

@@ -13,10 +13,22 @@ no always-on Mac, no paid hosting.
   practice API** — the same feed TradingView uses for `OANDA:` symbols — for
   all 27 pairs.
 - `engine.py` replays the identical trend/Nowick/retest/SL/TP math as the
-  Pine indicator, from scratch, every run (no fragile state between runs).
-- Any brand-new signal gets sent to your Telegram immediately. A small
-  `state.json` (committed back to the repo automatically) remembers what's
-  already been sent, so you never get duplicates.
+  Pine indicator. **State persists across runs** in `state.json`'s
+  `engine_state` field — trend/swing-high/swing-low/pending-retest carry
+  forward exactly like Pine's `var` keyword does, instead of being
+  recomputed from a short window every time (a short-window recompute can
+  land on the wrong trend if the confirming break happened before the
+  window starts — this bit us once during development, see git history).
+  The very first run for a pair does a deep ~52-day backfill to seed this
+  state accurately; every run after that only processes bars newer than
+  the last one it saw.
+- Any brand-new signal gets sent to your Telegram immediately. The same
+  `state.json` (committed back to the repo automatically) also tracks which
+  signals have already been sent (`last_alert`), so you never get
+  duplicates — this is a SEPARATE mechanism from `engine_state` and the two
+  are only ever meant to be reset together (see `main.py`'s `reset_pair()`
+  helper) — clearing one without the other either corrupts replay state or
+  re-sends already-seen signals.
 - The same run also checks for any Telegram commands you've sent
   (`/status`, `/pause`, etc.) and replies — see below. Since it only checks
   every 15 minutes, command replies can take up to that long.
@@ -69,7 +81,11 @@ Message your bot (`@fxsignlsbot`) any of these any time:
 - `pairs.py` — the 27 monitored pairs
 - `main.py` — orchestrates everything, run every 15 min by the workflow
 - `.github/workflows/scan.yml` — the schedule
-- `state.json` — dedupe memory, pause flag, last snapshot (auto-updated)
+- `state.json` — auto-updated every run:
+  - `engine_state` — persisted trend/swing/pending-retest per pair (Pine `var`-equivalent)
+  - `last_alert` — last signal time already sent per pair (dedupe)
+  - `pairs` — latest trend/pending snapshot for `/status`
+  - `pause`, `history`, failure counters, Telegram command offset
 
 ## Keeping parameters in sync
 
@@ -77,10 +93,25 @@ If you ever change an input on the TradingView indicator (EMA length, wick
 tolerance, retest bars, etc.), update the matching value in `PARAMS` at the
 top of `engine.py` so the two stay identical.
 
+## Verified against the live indicator
+
+This was checked directly against the live TradingView chart, not just
+unit-tested: debug output was temporarily added to the Pine script to print
+its real internal `HBC`/`LBC`/`htfEma`/`trend` values, and this engine's
+computation from independently-fetched OANDA data was diffed against it.
+Trend matched exactly on 5 different pairs, and three historical BUY
+signals matched TradingView's printed Entry/SL/TP to the exact decimal.
+(One implementation detail — how `_ema_series` seeds and how
+`_htf_bias_lookup` selects the HTF bar — was initially "fixed" based on a
+plausible-sounding assumption about Pine semantics, which this same live
+comparison proved wrong; see the docstrings in `engine.py` for the
+empirical evidence and why the code is deliberately the "naive" version.)
+
 ## Honest limitation
 
-OANDA's feed is the same source TradingView uses for `OANDA:` symbols, so
-this should track the indicator closely. It is still a separate computation
-against a separately-fetched candle stream — treat this as the same
-strategy, not a mirror of TradingView's exact internal repaint/tick
-behavior. Cross-check occasionally against the live indicator.
+OANDA's feed is the same source TradingView uses for `OANDA:` symbols, and
+this has been verified to match closely, but it is still a separate
+computation against a separately-fetched candle stream. Cross-check
+occasionally against the live indicator, especially if OANDA ever has data
+gaps or you change any indicator input without updating `engine.py`'s
+`PARAMS` to match.
