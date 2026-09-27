@@ -71,16 +71,34 @@ def _htf_bias_lookup(m15: list[dict], h1: list[dict], htf_ema: list[float]) -> l
     return out
 
 
-def run_engine(pair: str, m15: list[dict], h1: list[dict], pip_size: float) -> dict:
-    """Replays the full Pine state machine over historical bars.
+def run_engine(pair: str, m15: list[dict], h1: list[dict], pip_size: float, seed: dict | None = None) -> dict:
+    """Replays the Pine state machine over historical bars.
 
-    Returns {"trend": 1|-1|0, "pending": {...}|None, "signals": [ {...}, ... ]}
-    signals is every BUY/SELL trigger found in the fetched window, oldest first.
+    `seed`, if given, is the persisted state from the previous run
+    ({"trend", "swing_low", "swing_high", "watch_dir", "watch_level",
+    "watch_bars_left", "seeded_through"}). This matters: Pine's `var trend`
+    (and the other `var`s) persist across the indicator's ENTIRE chart
+    history, not just however many days we happen to fetch. Recomputing
+    from trend=0 every run using only a fetched window can land on the
+    wrong trend if the confirming break that set Pine's real state happened
+    before that window starts. Seeding from persisted state and only
+    advancing/emitting for bars strictly after `seeded_through` reproduces
+    Pine's true continuously-running state instead.
+
+    Without a seed (first run ever for a pair), state starts at 0/None
+    exactly like a freshly-added Pine indicator would, using the whole
+    fetched window as context — callers should fetch deep history in that
+    case to minimize the (small, but nonzero) chance of misseeding.
+
+    Returns {"trend", "pending", "signals", "state"} where "state" is the
+    new seed to persist for next run.
     """
     p = PARAMS
     n = len(m15)
-    if n < p["struct_lookback"] + p["pivot_len"] * 2 + 5:
-        return {"trend": 0, "pending": None, "signals": []}
+    pl = p["struct_lookback"]
+    pv = p["pivot_len"]
+    if n < pl + pv * 2 + 5:
+        return {"trend": 0, "pending": None, "signals": [], "state": seed}
 
     closes = [b["close"] for b in m15]
     opens = [b["open"] for b in m15]
@@ -91,18 +109,33 @@ def run_engine(pair: str, m15: list[dict], h1: list[dict], pip_size: float) -> d
     htf_bias = _htf_bias_lookup(m15, h1, htf_ema_full)
     atr = _atr14(m15)
 
-    trend = 0
-    swing_low = None
-    swing_high = None
-    watch_dir = 0
-    watch_level = None
-    watch_bars_left = 0
+    if seed:
+        trend = seed["trend"]
+        swing_low = seed["swing_low"]
+        swing_high = seed["swing_high"]
+        watch_dir = seed["watch_dir"]
+        watch_level = seed["watch_level"]
+        watch_bars_left = seed["watch_bars_left"]
+        seeded_through = _parse_time(seed["seeded_through"])
+        start_i = 0
+        for idx, bar in enumerate(m15):
+            if _parse_time(bar["time"]) > seeded_through:
+                start_i = idx
+                break
+        else:
+            start_i = n  # nothing new to process
+    else:
+        trend = 0
+        swing_low = None
+        swing_high = None
+        watch_dir = 0
+        watch_level = None
+        watch_bars_left = 0
+        start_i = pl
 
     signals = []
-    pl = p["struct_lookback"]
-    pv = p["pivot_len"]
 
-    for i in range(n):
+    for i in range(start_i, n):
         # ---- structure trend (body-close break + HTF EMA hysteresis lock) ----
         if i >= pl:
             hbc = max(closes[i - pl:i])
@@ -180,4 +213,14 @@ def run_engine(pair: str, m15: list[dict], h1: list[dict], pip_size: float) -> d
     if watch_dir != 0:
         pending = {"dir": "BUY" if watch_dir == 1 else "SELL", "level": watch_level, "bars_left": watch_bars_left}
 
-    return {"trend": trend, "pending": pending, "signals": signals}
+    new_seed = {
+        "trend": trend,
+        "swing_low": swing_low,
+        "swing_high": swing_high,
+        "watch_dir": watch_dir,
+        "watch_level": watch_level,
+        "watch_bars_left": watch_bars_left,
+        "seeded_through": m15[-1]["time"] if n > 0 else (seed["seeded_through"] if seed else None),
+    }
+
+    return {"trend": trend, "pending": pending, "signals": signals, "state": new_seed}

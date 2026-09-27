@@ -74,19 +74,28 @@ def main() -> None:
     last_alert = state.setdefault("last_alert", {})
     pairs_snapshot = state.setdefault("pairs", {})
     history = state.setdefault("history", [])
+    engine_state = state.setdefault("engine_state", {})
 
     now = datetime.now(timezone.utc)
     ok_count = 0
 
     for pair in PAIRS:
         try:
-            m15 = fetch_candles(pair, "M15", count=1500)
+            seed = engine_state.get(pair)
+            # First time ever seeing this pair: fetch OANDA's max window (5000
+            # M15 bars, ~52 days) so the seeded trend/swing state has the best
+            # chance of matching Pine's true continuously-running history.
+            # Once seeded, later runs persist state and only need a normal
+            # window for HBC/LBC/pivot lookback context.
+            m15_count = 5000 if seed is None else 1500
+            m15 = fetch_candles(pair, "M15", count=m15_count)
             h1 = fetch_candles(pair, "H1", count=2000)  # deep history so EMA150 is fully converged
             if len(m15) < 100 or len(h1) < 160:
                 continue
 
-            result = run_engine(pair, m15, h1, pip_size(pair))
+            result = run_engine(pair, m15, h1, pip_size(pair), seed=seed)
             pairs_snapshot[pair] = {"trend": result["trend"], "pending": result["pending"]}
+            engine_state[pair] = result["state"]
             ok_count += 1
 
             last_seen = last_alert.get(pair)
