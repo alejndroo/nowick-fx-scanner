@@ -1,8 +1,147 @@
 {
   "paused": false,
-  "last_alert": {},
-  "pairs": {},
+  "last_alert": {
+    "GBP_CHF": "2026-09-25T14:45:00.000000000Z",
+    "GBP_CAD": "2026-09-24T12:15:00.000000000Z",
+    "CAD_JPY": "2026-09-23T12:45:00.000000000Z",
+    "EUR_CAD": "2026-09-24T12:15:00.000000000Z",
+    "EUR_GBP": "2026-09-24T12:15:00.000000000Z",
+    "EUR_USD": "2026-09-24T12:45:00.000000000Z",
+    "NZD_JPY": "2026-09-24T07:30:00.000000000Z",
+    "AUD_CHF": "2026-09-25T13:45:00.000000000Z",
+    "EUR_CHF": "2026-09-25T11:45:00.000000000Z",
+    "EUR_AUD": "2026-09-25T11:45:00.000000000Z",
+    "USD_JPY": "2026-09-25T12:45:00.000000000Z",
+    "CHF_JPY": "2026-09-23T12:15:00.000000000Z",
+    "NZD_USD": "2026-09-25T10:00:00.000000000Z",
+    "AUD_JPY": "2026-09-24T10:45:00.000000000Z",
+    "GBP_JPY": "2026-09-25T12:30:00.000000000Z",
+    "EUR_JPY": "2026-09-25T12:30:00.000000000Z",
+    "NZD_CAD": "2026-09-25T12:30:00.000000000Z",
+    "NZD_CHF": "2026-09-25T11:15:00.000000000Z",
+    "GBP_NZD": "2026-09-25T16:00:00.000000000Z",
+    "USD_CHF": "2026-09-25T16:00:00.000000000Z",
+    "EUR_NZD": "2026-09-25T08:45:00.000000000Z",
+    "AUD_USD": "2026-09-22T08:30:00.000000000Z",
+    "AUD_NZD": "2026-09-25T08:00:00.000000000Z",
+    "AUD_CAD": "2026-09-25T12:00:00.000000000Z",
+    "USD_CAD": "2026-09-25T13:00:00.000000000Z",
+    "CAD_CHF": "2026-09-25T11:45:00.000000000Z",
+    "GBP_AUD": "2026-09-25T09:30:00.000000000Z"
+  },
+  "pairs": {
+    "GBP_CHF": {
+      "trend": -1,
+      "pending": null
+    },
+    "GBP_CAD": {
+      "trend": -1,
+      "pending": null
+    },
+    "CAD_JPY": {
+      "trend": -1,
+      "pending": null
+    },
+    "EUR_CAD": {
+      "trend": 1,
+      "pending": null
+    },
+    "EUR_GBP": {
+      "trend": 1,
+      "pending": null
+    },
+    "EUR_USD": {
+      "trend": -1,
+      "pending": null
+    },
+    "NZD_JPY": {
+      "trend": -1,
+      "pending": null
+    },
+    "AUD_CHF": {
+      "trend": -1,
+      "pending": null
+    },
+    "EUR_CHF": {
+      "trend": 1,
+      "pending": null
+    },
+    "EUR_AUD": {
+      "trend": 1,
+      "pending": null
+    },
+    "USD_JPY": {
+      "trend": -1,
+      "pending": null
+    },
+    "CHF_JPY": {
+      "trend": -1,
+      "pending": null
+    },
+    "NZD_USD": {
+      "trend": -1,
+      "pending": null
+    },
+    "AUD_JPY": {
+      "trend": -1,
+      "pending": null
+    },
+    "GBP_JPY": {
+      "trend": -1,
+      "pending": null
+    },
+    "EUR_JPY": {
+      "trend": -1,
+      "pending": null
+    },
+    "NZD_CAD": {
+      "trend": -1,
+      "pending": null
+    },
+    "NZD_CHF": {
+      "trend": -1,
+      "pending": null
+    },
+    "GBP_NZD": {
+      "trend": 1,
+      "pending": null
+    },
+    "USD_CHF": {
+      "trend": 1,
+      "pending": null
+    },
+    "EUR_NZD": {
+      "trend": 1,
+      "pending": null
+    },
+    "AUD_USD": {
+      "trend": -1,
+      "pending": null
+    },
+    "AUD_NZD": {
+      "trend": -1,
+      "pending": null
+    },
+    "AUD_CAD": {
+      "trend": -1,
+      "pending": null
+    },
+    "USD_CAD": {
+      "trend": 1,
+      "pending": null
+    },
+    "CAD_CHF": {
+      "trend": 1,
+      "pending": null
+    },
+    "GBP_AUD": {
+      "trend": 1,
+      "pending": null
+    }
+  },
   "history": [],
   "last_update_id": 867185123,
-  "last_run_utc": "2026-09-27T21:58:26+00:00"
+  "last_run_utc": "2026-09-27T22:15:02+00:00",
+  "consecutive_full_failures": 0,
+  "outage_alerted": false
 }
