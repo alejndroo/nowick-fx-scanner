@@ -89,7 +89,7 @@ def main() -> None:
             # window for HBC/LBC/pivot lookback context.
             m15_count = 5000 if seed is None else 1500
             m15 = fetch_candles(pair, "M15", count=m15_count)
-            h1 = fetch_candles(pair, "H1", count=2000)  # deep history so EMA150 is fully converged
+            h1 = fetch_candles(pair, "H1", count=5000)  # OANDA's max — minimizes EMA150 convergence error
             if len(m15) < 100 or len(h1) < 160:
                 continue
 
