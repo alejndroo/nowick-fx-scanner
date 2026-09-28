@@ -2,12 +2,14 @@ name: Nowick FX Scan
 
 on:
   schedule:
-    # Every 15 minutes, 24/7. Offset to :04/:19/:34/:49 (not the round
-    # :00/:15/:30/:45 marks) — GitHub's own docs warn that scheduled
-    # workflows can be delayed or dropped under high load, and load peaks
-    # hardest exactly on the round minutes every other repo also schedules
-    # on. Signal detection logic is unaffected; only the trigger timing changed.
-    - cron: "4,19,34,49 * * * *"
+    # Every 15 minutes, 24/7. Offset to :01/:16/:31/:46 — the minimum
+    # possible offset off the round :00/:15/:30/:45 marks where every other
+    # repo's cron also piles up (GitHub's own docs warn scheduled workflows
+    # can be delayed/dropped under that load). Kept to exactly 1 minute
+    # since this strategy trades off 15m candle closes: every extra minute
+    # of delay is a minute of price drift away from the signal's entry.
+    # Signal detection logic is unaffected; only the trigger timing changed.
+    - cron: "1,16,31,46 * * * *"
   workflow_dispatch: {}  # allows manual "Run workflow" button for testing
 
 permissions:
