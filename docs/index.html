@@ -238,9 +238,9 @@
         <div class="range-tabs" id="rangeTabs">
           <div class="range-indicator" id="rangeIndicator"></div>
           <div class="range-tab" data-range="1D" onclick="setRange('1D',this)">1D</div>
-          <div class="range-tab on" data-range="1W" onclick="setRange('1W',this)">1W</div>
+          <div class="range-tab" data-range="1W" onclick="setRange('1W',this)">1W</div>
           <div class="range-tab" data-range="1M" onclick="setRange('1M',this)">1M</div>
-          <div class="range-tab" data-range="ALL" onclick="setRange('ALL',this)">ALL</div>
+          <div class="range-tab on" data-range="ALL" onclick="setRange('ALL',this)">ALL</div>
         </div>
       </div>
       <div class="spark"><svg id="sparkSvg" viewBox="0 0 320 100" preserveAspectRatio="none"></svg></div>
@@ -349,7 +349,7 @@
   // P&L number (and the all-time total) can be toggled to an approximate
   // £ display using the live rate pushed to /fx/usd_gbp.
   let state = { live:{}, account:{}, signals:{}, trades:{}, calendar:{}, topPairs:[], fx:{} };
-  let currentRange = '1W';
+  let currentRange = 'ALL';
   let calViewDate = new Date();
   let showGbp = (localStorage.getItem('nowick_ccy') === 'gbp');
 
@@ -485,7 +485,11 @@
     document.getElementById('pnlLabel').textContent = 'P&L · ' + ({'1D':'Today','1W':'This Week','1M':'This Month','ALL':'All Time'}[currentRange]);
     const delta = document.getElementById('pnlDelta');
     const floating = (state.account && state.account.floating_pnl_gbp) || 0;
-    delta.textContent = floating !== 0 ? fmtUSD(floating) + ' floating from open trades' : (state.live.updated_at ? 'Updated ' + new Date(state.live.updated_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : 'Waiting for live data…');
+    // The headline number is always the TOTAL (closed trades in range + any
+    // currently-open floating P&L) — never just the open-trade amount on its
+    // own. This subtitle is a secondary detail, never a replacement for it.
+    const base = state.live.updated_at ? 'Updated ' + new Date(state.live.updated_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : 'Waiting for live data…';
+    delta.textContent = floating !== 0 ? base + ' · incl. ' + fmtUSD(floating) + ' floating' : base;
 
     const allTimeVal = state.live.all_time_gbp || 0;
     const rate = (state.fx && state.fx.usd_gbp) || 0.79;
