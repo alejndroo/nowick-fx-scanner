@@ -11,13 +11,13 @@ MT5_SERVER = "YourBroker-Live"  # exact server name, e.g. "ICMarketsSC-Live01"
 SYMBOL_SUFFIX = ""
 
 # --- Risk ---
-RISK_PCT = 0.25          # fraction of account equity risked per trade (0.25 = 25%)
+RISK_PCT = 0.15          # fraction of account equity risked per trade (0.15 = 15%)
 MAX_OPEN_TRADES = 3      # bot will not open a new trade while this many of its own are open
 
 # Safety net matching the "no overnight holding" rule: force-close every
 # position this bot opened once UTC reaches this hour, even if SL/TP hasn't
-# been hit yet. Session signals only fire 07:00-13:00 UTC, so 21:00 gives a
-# wide buffer while still guaranteeing nothing carries overnight.
+# been hit yet. Session signals only fire 07:00-20:45 UTC (London open to
+# 15 min before NY close), so 21:00 gives a clean buffer past that.
 FORCE_CLOSE_HOUR_UTC = 21
 
 # --- Optional: Telegram confirmations (reuse the same bot/chat as the signal bot) ---

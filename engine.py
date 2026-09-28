@@ -17,8 +17,9 @@ PARAMS = dict(
     sl_buffer_pips=2.0,
     min_risk_dist_atr=0.9,
     risk_reward=1.0,
-    session_start_utc=7,
-    session_end_utc=13,
+    session_start_utc=7,      # London open
+    session_end_hour=20,      # NY close (21:00 UTC) minus a 15-min buffer
+    session_end_minute=45,
 )
 
 
@@ -168,10 +169,14 @@ def run_engine(pair: str, m15: list[dict], h1: list[dict], pip_size: float, seed
         bull_nowick = bull_raw and trend == 1
         bear_nowick = bear_raw and trend == -1
 
-        # ---- session filter ----
-        hour_utc = _parse_time(m15[i]["time"]).hour
-        s, e = p["session_start_utc"], p["session_end_utc"]
-        session_ok = (s <= hour_utc < e) if s <= e else (hour_utc >= s or hour_utc < e)
+        # ---- session filter: London open through 15 min before NY close ----
+        bar_t = _parse_time(m15[i]["time"])
+        hour_utc, minute_utc = bar_t.hour, bar_t.minute
+        after_start = hour_utc >= p["session_start_utc"]
+        before_end = (hour_utc < p["session_end_hour"]) or (
+            hour_utc == p["session_end_hour"] and minute_utc < p["session_end_minute"]
+        )
+        session_ok = after_start and before_end
 
         # ---- retest state machine ----
         if watch_dir != 0:
