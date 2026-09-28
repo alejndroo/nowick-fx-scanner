@@ -221,7 +221,7 @@
 
 <div class="app">
   <div class="topbar">
-    <div class="greet" id="greeting">Good evening, <span class="name">Alejandro</span></div>
+    <div class="greet" id="greeting">Hello, <span class="name">Alejandro</span></div>
     <div class="status-pill" id="statusPill"><span class="dot"></span>LIVE</div>
   </div>
 
@@ -292,7 +292,7 @@
       </div>
       <div class="acc-card anim-in" style="text-align:left; animation-delay:.05s;">
         <div class="acc-row"><span>Risk per trade</span><input id="riskPctInput" type="number" step="0.1" value="15" onchange="updateAccountSetting('risk_pct', this.value)"> %</div>
-        <div class="acc-row"><span>Max simultaneous trades</span><span class="r-val">3</span></div>
+        <div class="acc-row"><span>Max simultaneous trades</span><span class="r-val">6</span></div>
         <div class="acc-row"><span>Total withdrawn</span><span class="r-val" id="totalWithdrawn">$0.00</span></div>
       </div>
       <div class="acc-card anim-in" style="text-align:left; animation-delay:.1s;">
@@ -698,6 +698,14 @@
     el.appendChild(r);
     setTimeout(()=>r.remove(), 600);
   });
+
+  function updateGreeting(){
+    const h = new Date().getHours();
+    const word = h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 22 ? 'Good evening' : 'Good night';
+    document.getElementById('greeting').innerHTML = word + ', <span class="name">Alejandro</span>';
+  }
+  updateGreeting();
+  setInterval(updateGreeting, 5 * 60 * 1000);
 
   renderCalendar();
   requestAnimationFrame(()=>{ positionRangeIndicator(); positionTabIndicator(document.querySelector('.tab.on')); });
