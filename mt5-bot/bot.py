@@ -11,6 +11,7 @@ engine's session filter).
 """
 import json
 import os
+import random
 import time
 import traceback
 from datetime import datetime, timezone
@@ -109,7 +110,8 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime) -> 
         if account is None:
             notify("❌ Could not read account info — skipping this signal.")
             continue
-        risk_pct = firebase_push.get_risk_pct(config.RISK_PCT)
+        default_risk_pct = random.uniform(config.RISK_PCT_MIN, config.RISK_PCT_MAX)
+        risk_pct = firebase_push.get_risk_pct(default_risk_pct)
         risk_amount = account.equity * risk_pct
 
         try:

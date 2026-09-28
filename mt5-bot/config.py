@@ -11,7 +11,12 @@ MT5_SERVER = "YourBroker-Live"  # exact server name, e.g. "ICMarketsSC-Live01"
 SYMBOL_SUFFIX = ""
 
 # --- Risk ---
-RISK_PCT = 0.15          # fraction of account equity risked per trade (0.15 = 15%)
+# Each trade independently risks a random amount in this range (0.15-0.20 =
+# 15-20% of equity), unless overridden live from the dashboard's Risk %
+# field — that always takes priority when set, this range is only the
+# fallback used when the dashboard hasn't been touched.
+RISK_PCT_MIN = 0.15
+RISK_PCT_MAX = 0.20
 MAX_OPEN_TRADES = 6      # bot will not open a new trade while this many of its own are open (any mix of pairs)
 
 # Safety net matching the "no overnight holding" rule: force-close every
