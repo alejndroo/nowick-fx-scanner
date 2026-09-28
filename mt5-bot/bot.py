@@ -140,6 +140,21 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime, pla
             continue
         risk_pct = firebase_push.get_risk_pct(plan["risk_pct"])
         risk_amount = account.equity * risk_pct
+
+        # Portfolio-level cap: per-trade risk alone doesn't stop several
+        # correlated pairs (this list is heavy on EUR/GBP/AUD/NZD crosses)
+        # from each independently risking 15-20% at once — check the TOTAL
+        # already at risk plus this new trade before sizing it.
+        current_total_risk = broker.total_open_risk()
+        aggregate_cap = account.equity * config.AGGREGATE_RISK_CAP_PCT
+        if current_total_risk + risk_amount > aggregate_cap:
+            notify(
+                f"⚠️ Skipped {display_symbol(pair)} {sig['dir']} — aggregate open risk cap: "
+                f"current ${current_total_risk:.2f} + new ${risk_amount:.2f} would exceed "
+                f"{config.AGGREGATE_RISK_CAP_PCT*100:.0f}% of equity (${aggregate_cap:.2f})."
+            )
+            continue
+
         # Hard ceiling independent of the risk_pct calculation above — 25%
         # headroom over the approved max, purely as a structural backstop
         # against a sizing bug or bad SL fill, never meant to bind normally.

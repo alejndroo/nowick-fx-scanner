@@ -127,6 +127,34 @@ def open_positions_count(magic: int = MAGIC) -> int:
     return sum(1 for p in positions if p.magic == magic)
 
 
+def total_open_risk(magic: int = MAGIC) -> float:
+    """Sum of the worst-case dollar loss (to each position's OWN stop-loss)
+    across every currently open position tagged with `magic`.
+
+    Per-trade risk_pct alone doesn't stop several correlated pairs from
+    each independently risking 15-20% of equity at the same time — a
+    zero-trust audit flagged that MAX_OPEN_TRADES(6) x RISK_PCT_MAX(20%)
+    has no structural check preventing >100% of equity being at risk
+    simultaneously across positions likely to move together (EUR/GBP/AUD/
+    NZD crosses). This gives bot.py a real number to cap against before
+    opening a new trade.
+    """
+    positions = mt5.positions_get()
+    if not positions:
+        return 0.0
+    total = 0.0
+    for p in positions:
+        if p.magic != magic or not p.sl:
+            continue  # no stop set is not expected to happen; skip rather than crash
+        info = mt5.symbol_info(p.symbol)
+        if info is None or not info.trade_tick_size or not info.trade_tick_value:
+            continue
+        value_per_price_unit_per_lot = info.trade_tick_value / info.trade_tick_size
+        risk_dist = abs(p.price_open - p.sl)
+        total += risk_dist * p.volume * value_per_price_unit_per_lot
+    return total
+
+
 # The MetaTrader5 Python package doesn't expose SYMBOL_FILLING_FOK/IOC as
 # named attributes even though the bitmask values are stable/documented in
 # the underlying MQL5 API — using mt5.SYMBOL_FILLING_IOC raises

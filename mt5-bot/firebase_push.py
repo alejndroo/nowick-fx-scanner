@@ -116,7 +116,19 @@ def sync_to_firebase(journal_data: dict | None = None) -> dict:
     for p in our_positions:
         pair_display = p.symbol[:-len(config.SYMBOL_SUFFIX)] if config.SYMBOL_SUFFIX and p.symbol.endswith(config.SYMBOL_SUFFIX) else p.symbol
         risk_dist = abs(p.price_open - p.sl) if p.sl else None
-        r_multiple = round(p.profit / (risk_dist * p.volume * 100000), 3) if risk_dist else 0.0
+        # Use the symbol's REAL tick_value/tick_size (same values mt5_broker's
+        # own position sizing uses), not a hardcoded 100000 contract-size
+        # multiplier — that assumed quote currency == account currency (USD),
+        # which is wrong for most of this pair list (JPY pairs, EUR/GBP/AUD/
+        # NZD/CAD/CHF crosses) and silently mis-displayed R-multiples for them.
+        r_multiple = 0.0
+        if risk_dist:
+            sym_info = mt5.symbol_info(p.symbol)
+            if sym_info is not None and sym_info.trade_tick_size:
+                value_per_price_unit_per_lot = sym_info.trade_tick_value / sym_info.trade_tick_size
+                loss_per_lot = risk_dist * value_per_price_unit_per_lot
+                if loss_per_lot > 0:
+                    r_multiple = round(p.profit / (loss_per_lot * p.volume), 3)
         existing = all_trades.get(str(p.ticket), {})
         opened_at = existing.get("opened_at") or datetime.now(timezone.utc).isoformat(timespec="seconds")
         trades_ref.child(str(p.ticket)).update({
