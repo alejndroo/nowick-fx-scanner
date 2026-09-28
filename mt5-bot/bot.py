@@ -87,7 +87,7 @@ def digits_for(pair: str) -> int:
     return 3 if pair.endswith("JPY") else 5
 
 
-def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime, plan: dict, journal_data: dict) -> None:
+def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime, plan: dict, journal_data: dict, day_start_balance: float | None) -> None:
     symbol = broker.mt5_symbol(pair, config.SYMBOL_SUFFIX)
     if mt5.symbol_info(symbol) is None:
         return  # not offered by this broker, or the suffix/name doesn't match
@@ -115,6 +115,16 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime, pla
 
         if plan.get("daily_loss_limit_hit"):
             continue  # the daily circuit breaker notification already happened once, in main() — no per-signal spam here
+
+        # LIVE re-check, not just the plan snapshot from the start of this
+        # scan cycle: if pair #5's fill just breached the daily limit, pairs
+        # #6-27 in this SAME ~60s cycle must not still trade on the stale
+        # plan — this is the actual circuit breaker; the plan flag above is
+        # only a fast-path/notification convenience.
+        if day_start_balance and day_start_balance > 0:
+            live_pnl = journal.today_realized_pnl(journal_data, now)
+            if live_pnl < 0 and (-live_pnl / day_start_balance) >= planner.DAILY_LOSS_LIMIT_PCT:
+                continue
 
         if pair in plan.get("paused_pairs", []):
             continue  # planner: this pair's recent win rate is meaningfully below average, sitting out today
@@ -242,7 +252,7 @@ def main() -> None:
                 ok_count = 0
                 for pair in PAIRS:
                     try:
-                        process_pair(pair, engine_state, seeded, now, plan, journal_data)
+                        process_pair(pair, engine_state, seeded, now, plan, journal_data, day_start_balance)
                         ok_count += 1
                     except Exception:
                         print(f"Error processing {pair}:", traceback.format_exc())
