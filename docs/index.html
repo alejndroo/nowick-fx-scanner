@@ -103,6 +103,10 @@
   .digit-cell{ height:1em; line-height:1em; text-align:center; font-variant-numeric:tabular-nums; }
 
   .pnl-delta{ margin-top:8px; font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-dim); }
+  .pnl-breakdown{ display:flex; gap:10px; justify-content:center; margin-top:12px; }
+  .pnl-breakdown > div{ background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:8px 14px; text-align:center; }
+  .pnl-breakdown .k{ display:block; font-family:'IBM Plex Mono',monospace; font-size:9px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.04em; }
+  .pnl-breakdown .v{ display:block; font-family:'Sora',sans-serif; font-weight:700; font-size:15px; margin-top:3px; font-variant-numeric:tabular-nums; }
   .range-tabs{ position:relative; display:flex; gap:6px; justify-content:center; margin-top:14px; }
   .range-tab{ position:relative; z-index:1; font-family:'IBM Plex Mono',monospace; font-size:10px; padding:6px 12px; border-radius:8px; color:var(--text-faint); border:1px solid var(--border); cursor:pointer; user-select:none; transition:color .25s ease; }
   .range-tab.on{ color:var(--bg); font-weight:700; }
@@ -243,6 +247,10 @@
         </div>
         <div class="pnl-value" id="pnlValue"></div>
         <div class="pnl-delta" id="pnlDelta">Waiting for live data…</div>
+        <div class="pnl-breakdown" id="pnlBreakdown" style="display:none;">
+          <div><span class="k">Realized</span><span class="v" id="pnlRealized">$0.00</span></div>
+          <div><span class="k">Floating (open trades)</span><span class="v" id="pnlFloating">$0.00</span></div>
+        </div>
         <div class="range-tabs" id="rangeTabs" style="display:none;">
           <div class="range-indicator" id="rangeIndicator"></div>
           <div class="range-tab" data-range="1D" onclick="setRange('1D',this)">1D</div>
@@ -311,7 +319,7 @@
       <div class="acc-card anim-in" style="text-align:left; animation-delay:.08s;">
         <div class="acc-row"><span>Risk override <span style="color:var(--text-faint); font-size:10px;">(blank = AI-adaptive)</span></span><input id="riskPctInput" type="number" step="0.1" placeholder="auto" onchange="updateAccountSetting('risk_pct', this.value)"> %</div>
         <div style="margin-top:6px;"><button class="pressable" style="background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim); border-radius:8px; padding:6px 12px; font-family:'IBM Plex Mono',monospace; font-size:10px;" onclick="clearRiskOverride()">Clear override</button></div>
-        <div class="acc-row" style="margin-top:6px;"><span>Max simultaneous trades</span><span class="r-val">6</span></div>
+        <div class="acc-row" style="margin-top:6px;"><span>Max simultaneous trades</span><span class="r-val" id="maxOpenTrades">—</span></div>
         <div class="acc-row"><span>Total withdrawn</span><span class="r-val" id="totalWithdrawn">$0.00</span></div>
       </div>
       <div class="acc-card anim-in" style="text-align:left; animation-delay:.1s;">
@@ -390,6 +398,18 @@
   function fmtUSD(n){
     const s = Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
     return (n<0?'-':'') + '$' + s;
+  }
+
+  // Raw entry/sl/tp prices can carry floating-point tails from the Python
+  // side's arithmetic (e.g. 1.8758599999999999) — confirmed live on the
+  // dashboard. Fixed-decimal formatting (matching the bot's own JPY vs
+  // non-JPY digit convention) instead of rendering the raw number.
+  function fmtPrice(n){
+    if(n == null || n === '') return '—';
+    const num = Number(n);
+    if(isNaN(num)) return String(n);
+    const digits = Math.abs(num) >= 10 ? 3 : 5;
+    return num.toFixed(digits);
   }
 
   function connectedPill(ok){
@@ -516,21 +536,30 @@
     const updatedBase = state.live.updated_at ? 'Updated ' + new Date(state.live.updated_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : 'Waiting for live data…';
 
     let val;
+    const breakdownEl = document.getElementById('pnlBreakdown');
     if(homeMode === 'balance'){
       val = (state.account && state.account.balance_gbp) || 0;
       document.getElementById('pnlLabel').textContent = 'Account Balance';
       const equity = (state.account && state.account.equity_usd);
       let d = updatedBase;
       if(equity != null) d += ' · Equity ' + fmtUSD(equity);
-      if(floating !== 0) d += ' · ' + (floating>=0?'+':'') + fmtUSD(floating) + ' floating';
       document.getElementById('pnlDelta').textContent = d;
+      breakdownEl.style.display = 'none';
     } else {
+      const realized = rangeValue() - floating;
       val = rangeValue();
       document.getElementById('pnlLabel').textContent = 'P&L · ' + ({'1D':'Today','1W':'This Week','1M':'This Month','ALL':'All Time'}[currentRange]);
-      // The headline number is always the TOTAL (closed trades in range + any
-      // currently-open floating P&L) — never just the open-trade amount on
-      // its own. This subtitle is a secondary detail, never a replacement.
-      document.getElementById('pnlDelta').textContent = floating !== 0 ? updatedBase + ' · incl. ' + fmtUSD(floating) + ' floating' : updatedBase;
+      document.getElementById('pnlDelta').textContent = updatedBase;
+      // This headline is a SUM of two very different numbers (closed-trade
+      // results + whatever's still floating on open trades) — a subtitle
+      // alone wasn't clear enough (confirmed: read as "the bot lost $40"
+      // when the real floating exposure was $15). Always show both
+      // explicitly, not just when floating happens to be non-zero.
+      document.getElementById('pnlRealized').textContent = fmtUSD(realized);
+      document.getElementById('pnlRealized').style.color = realized < 0 ? 'var(--bear)' : 'var(--bull)';
+      document.getElementById('pnlFloating').textContent = fmtUSD(floating);
+      document.getElementById('pnlFloating').style.color = floating < 0 ? 'var(--bear)' : 'var(--bull)';
+      breakdownEl.style.display = 'flex';
     }
 
     el.classList.toggle('neg', val < 0);
@@ -588,7 +617,7 @@
       const pos = t.pnl_gbp >= 0;
       entry.pnlEl.textContent = `${fmtUSD(t.pnl_gbp)} (${t.r_multiple>=0?'+':''}${t.r_multiple}R)`;
       entry.pnlEl.style.color = pos ? 'var(--bull)' : 'var(--bear)';
-      entry.metaEl.textContent = `Entry ${t.entry} · SL ${t.sl} · TP ${t.tp}`;
+      entry.metaEl.textContent = `Entry ${fmtPrice(t.entry)} · SL ${fmtPrice(t.sl)} · TP ${fmtPrice(t.tp)}`;
 
       if(prevEl){ if(prevEl.nextSibling !== entry.el) container.insertBefore(entry.el, prevEl.nextSibling); }
       else if(container.firstChild !== entry.el){ container.insertBefore(entry.el, container.firstChild); }
@@ -698,9 +727,9 @@
       // Reassigned every render (not just on card creation) so these always
       // copy the CURRENT trade's values, not whatever they were when the
       // card was first built.
-      entry.entryEl.parentElement.onclick = ()=>copyVal(t.entry??'', 'Entry');
-      entry.slEl.parentElement.onclick = ()=>copyVal(t.sl??'', 'SL');
-      entry.tpEl.parentElement.onclick = ()=>copyVal(t.tp??'', 'TP');
+      entry.entryEl.parentElement.onclick = ()=>copyVal(t.entry!=null ? fmtPrice(t.entry) : '', 'Entry');
+      entry.slEl.parentElement.onclick = ()=>copyVal(t.sl!=null ? fmtPrice(t.sl) : '', 'SL');
+      entry.tpEl.parentElement.onclick = ()=>copyVal(t.tp!=null ? fmtPrice(t.tp) : '', 'TP');
 
       entry.el.classList.toggle('open', isOpen);
       entry.dirEl.textContent = t.dir;
@@ -708,9 +737,9 @@
       entry.pairEl.textContent = t.pair;
       entry.statusEl.className = 'sig-status ' + statusClass;
       entry.statusEl.innerHTML = (isOpen?'<span class="dot" style="width:5px;height:5px;"></span>':'') + statusLabel;
-      entry.entryEl.textContent = t.entry ?? '—';
-      entry.slEl.textContent = t.sl ?? '—';
-      entry.tpEl.textContent = t.tp ?? '—';
+      entry.entryEl.textContent = fmtPrice(t.entry);
+      entry.slEl.textContent = fmtPrice(t.sl);
+      entry.tpEl.textContent = fmtPrice(t.tp);
       entry.whenEl.textContent = timeAgo(when) + (isOpen?'':(isManual?' · Scheduled close':' · '+(isWin?'Hit TP':'Hit SL')));
       entry.pnlEl.textContent = fmtUSD(t.pnl_gbp||0);
       entry.pnlEl.className = 'pnl ' + ((t.pnl_gbp||0)>=0?'pos':'neg');
@@ -784,6 +813,10 @@
     document.getElementById('accBalance').textContent = fmtUSD(a.balance_gbp ?? 0);
     document.getElementById('totalWithdrawn').textContent = fmtUSD(a.total_withdrawn_gbp ?? 0);
     if(document.activeElement.id !== 'riskPctInput') document.getElementById('riskPctInput').value = a.risk_pct ?? '';
+    const maxEl = document.getElementById('maxOpenTrades');
+    maxEl.textContent = a.max_open_trades != null
+      ? a.max_open_trades + (a.open_positions_count != null ? ` (${a.open_positions_count} now)` : '')
+      : '—';
   }
 
   window.updateAccountSetting = function(key, val){

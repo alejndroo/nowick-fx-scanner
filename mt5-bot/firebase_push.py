@@ -192,6 +192,8 @@ def sync_to_firebase(journal_data: dict | None = None) -> dict:
         "equity_usd": round(account.equity, 2),
         "floating_pnl_gbp": round(floating, 2),
         "total_withdrawn_gbp": round(total_withdrawn, 2),
+        "max_open_trades": config.MAX_OPEN_TRADES,
+        "open_positions_count": len(our_positions),
         "currency": account.currency,
     })
 
