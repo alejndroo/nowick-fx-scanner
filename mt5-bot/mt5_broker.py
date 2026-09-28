@@ -30,6 +30,29 @@ def connect(login: int, password: str, server: str) -> None:
         raise RuntimeError(f"MT5 login() failed: {mt5.last_error()}")
 
 
+def is_connected() -> bool:
+    """True only if the terminal IPC link AND the trade account session are
+    both actually alive. mt5.* calls return None/empty on either kind of
+    disconnect without raising, which otherwise looks identical to a normal
+    "this symbol isn't offered" skip — this is the one place that tells the
+    two apart.
+    """
+    return mt5.terminal_info() is not None and mt5.account_info() is not None
+
+
+def reconnect(login: int, password: str, server: str) -> bool:
+    """Best-effort recovery from a dropped terminal/account session."""
+    try:
+        mt5.shutdown()
+    except Exception:
+        pass
+    try:
+        connect(login, password, server)
+        return True
+    except Exception:
+        return False
+
+
 def fetch_candles(symbol: str, granularity: str, count: int) -> list[dict]:
     """Same shape as oanda.fetch_candles: only CLOSED candles, oldest -> newest.
 
@@ -79,12 +102,42 @@ def open_positions_count(magic: int = MAGIC) -> int:
     return sum(1 for p in positions if p.magic == magic)
 
 
+def _filling_type(info) -> int:
+    """Brokers only accept specific fill modes per symbol (a bitmask on
+    symbol_info.filling_mode) — hardcoding IOC silently fails every single
+    order on any broker/symbol that doesn't support it. Prefer IOC, then
+    FOK, then fall back to RETURN (always accepted)."""
+    mode = info.filling_mode
+    if mode & mt5.SYMBOL_FILLING_IOC:
+        return mt5.ORDER_FILLING_IOC
+    if mode & mt5.SYMBOL_FILLING_FOK:
+        return mt5.ORDER_FILLING_FOK
+    return mt5.ORDER_FILLING_RETURN
+
+
+def enforce_min_stop_distance(symbol: str, price: float, sl: float, tp: float) -> tuple[float, float]:
+    """Widens sl/tp outward if they're inside the broker's minimum stop
+    distance for this symbol — otherwise order_send rejects the order with
+    no way to tell it apart from any other failure."""
+    info = mt5.symbol_info(symbol)
+    if info is None or not info.trade_stops_level:
+        return sl, tp
+    min_dist = info.trade_stops_level * info.point
+    if abs(price - sl) < min_dist:
+        sl = price - min_dist if sl < price else price + min_dist
+    if abs(price - tp) < min_dist:
+        tp = price + min_dist if tp > price else price - min_dist
+    return sl, tp
+
+
 def place_order(symbol: str, direction: str, lots: float, sl: float, tp: float, deviation: int = 20) -> dict:
     tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        raise RuntimeError(f"symbol_info_tick failed for {symbol}")
+    info = mt5.symbol_info(symbol)
+    if tick is None or info is None:
+        raise RuntimeError(f"symbol_info/tick failed for {symbol}")
     order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
     price = tick.ask if direction == "BUY" else tick.bid
+    sl, tp = enforce_min_stop_distance(symbol, price, sl, tp)
     request = {
         "action": mt5.TRADE_ACTION_DEAL,
         "symbol": symbol,
@@ -97,11 +150,12 @@ def place_order(symbol: str, direction: str, lots: float, sl: float, tp: float, 
         "magic": MAGIC,
         "comment": "NowickBot",
         "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
+        "type_filling": _filling_type(info),
     }
     result = mt5.order_send(request)
     if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-        raise RuntimeError(f"order_send failed for {symbol}: {result}")
+        code = result.retcode if result is not None else mt5.last_error()
+        raise RuntimeError(f"order_send failed for {symbol}: retcode={code} full={result}")
     return {"ticket": result.order, "price": result.price}
 
 
@@ -115,7 +169,8 @@ def close_all(magic: int = MAGIC) -> int:
         if pos.magic != magic:
             continue
         tick = mt5.symbol_info_tick(pos.symbol)
-        if tick is None:
+        info = mt5.symbol_info(pos.symbol)
+        if tick is None or info is None:
             continue
         close_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
         price = tick.bid if pos.type == mt5.ORDER_TYPE_BUY else tick.ask
@@ -130,9 +185,11 @@ def close_all(magic: int = MAGIC) -> int:
             "magic": magic,
             "comment": "NowickBot close",
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": _filling_type(info),
         }
         result = mt5.order_send(request)
         if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
             closed += 1
+        else:
+            print(f"close_all: failed to close {pos.symbol} ticket {pos.ticket}: {result}")
     return closed

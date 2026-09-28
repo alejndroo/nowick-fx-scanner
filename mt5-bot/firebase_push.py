@@ -51,9 +51,13 @@ def get_risk_pct(default: float) -> float:
     not just a display. Firebase stores it as a percentage (e.g. 15), config
     stores a fraction (0.15) — converts and sanity-checks, falling back to
     `default` (config.RISK_PCT) if unset, unreadable, or out of range.
+
+    init_firebase() is INSIDE the try block deliberately: a Firebase outage
+    or bad credential must never block real trade execution — this always
+    degrades to the safe config default instead of raising into the caller.
     """
-    init_firebase()
     try:
+        init_firebase()
         val = db.reference("/account/risk_pct").get()
         if val is None:
             return default
@@ -91,6 +95,10 @@ def sync_to_firebase(_unused: dict | None = None) -> dict:
 
     account = mt5.account_info()
     if account is None:
+        # mt5.account_info() returns None (never raises) on a dropped
+        # terminal/account session, so this is the ONE place that would
+        # otherwise silently do nothing every ~1s with zero visible symptom.
+        print("Firebase sync: mt5.account_info() returned None — MT5 session may be disconnected.")
         return {}
 
     positions = mt5.positions_get() or []

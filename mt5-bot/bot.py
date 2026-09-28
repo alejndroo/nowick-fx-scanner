@@ -58,6 +58,18 @@ def send_telegram(text: str) -> None:
         pass
 
 
+def notify(text: str) -> None:
+    """Every skip/failure/execution notice goes through this, not
+    send_telegram() directly — send_telegram() silently no-ops when
+    TELEGRAM_BOT_TOKEN is unset (the shipped default), which previously made
+    a failed trade or a skipped signal produce ZERO visible output anywhere.
+    This guarantees it's always at least printed to this console.
+    """
+    plain = text.replace("*", "").replace("`", "")
+    print(plain)
+    send_telegram(text)
+
+
 def digits_for(pair: str) -> int:
     return 3 if pair.endswith("JPY") else 5
 
@@ -89,13 +101,13 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime) -> 
             continue
 
         if broker.open_positions_count() >= config.MAX_OPEN_TRADES:
-            send_telegram(f"⚠️ Skipped {display_symbol(pair)} {sig['dir']} — {config.MAX_OPEN_TRADES} trades already open.")
+            notify(f"⚠️ Skipped {display_symbol(pair)} {sig['dir']} — {config.MAX_OPEN_TRADES} trades already open.")
             continue
 
         risk_distance = abs(sig["entry"] - sig["sl"])
         account = mt5.account_info()
         if account is None:
-            send_telegram("❌ Could not read account info — skipping this signal.")
+            notify("❌ Could not read account info — skipping this signal.")
             continue
         risk_pct = firebase_push.get_risk_pct(config.RISK_PCT)
         risk_amount = account.equity * risk_pct
@@ -103,7 +115,7 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime) -> 
         try:
             lots = broker.lots_for_risk(symbol, risk_amount, risk_distance)
         except Exception as e:
-            send_telegram(f"❌ Position sizing failed for {display_symbol(pair)}: {e}")
+            notify(f"❌ Position sizing failed for {display_symbol(pair)}: {e}")
             continue
 
         # Anchor SL/TP to the REAL fill price, not the historical retest level
@@ -123,7 +135,7 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime) -> 
         try:
             res = broker.place_order(symbol, sig["dir"], lots, sl, tp)
             d = digits_for(pair)
-            send_telegram(
+            notify(
                 f"✅ *{sig['dir']} {display_symbol(pair)}* executed\n"
                 f"Lots: {lots}\n"
                 f"Entry: `{res['price']:.{d}f}`\n"
@@ -132,12 +144,12 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime) -> 
                 f"Risk: {risk_pct * 100:.0f}% equity"
             )
         except Exception as e:
-            send_telegram(f"❌ Order failed for {display_symbol(pair)} {sig['dir']}: {e}")
+            notify(f"❌ Order failed for {display_symbol(pair)} {sig['dir']}: {e}")
 
 
 def main() -> None:
     broker.connect(config.MT5_LOGIN, config.MT5_PASSWORD, config.MT5_SERVER)
-    send_telegram("🤖 Nowick MT5 auto-trader started.")
+    notify("🤖 Nowick MT5 auto-trader started.")
     print("Connected to MT5. Auto-trading loop running — leave this window open.")
 
     state = load_state()
@@ -151,6 +163,20 @@ def main() -> None:
         try:
             now = datetime.now(timezone.utc)
 
+            # mt5.* calls return None/empty (never raise) on a dropped
+            # terminal/account session — without this check, a total
+            # disconnect looks EXACTLY like "no pairs matched right now" on
+            # the console: no error, no symptom, just silence forever.
+            if not broker.is_connected():
+                print(f"[{now.isoformat(timespec='seconds')}] MT5 session appears disconnected — attempting reconnect...")
+                if broker.reconnect(config.MT5_LOGIN, config.MT5_PASSWORD, config.MT5_SERVER):
+                    notify("✅ MT5 reconnected after a dropped session.")
+                else:
+                    print("Reconnect failed — will retry next cycle.")
+                    tick += 1
+                    time.sleep(1)
+                    continue
+
             if now.hour >= config.FORCE_CLOSE_HOUR_UTC and last_force_close_date != now.date():
                 tickets = [p.ticket for p in (mt5.positions_get() or []) if p.magic == broker.MAGIC]
                 if tickets:
@@ -160,16 +186,24 @@ def main() -> None:
                         print("mark_force_closing failed:", traceback.format_exc())
                 closed = broker.close_all()
                 if closed:
-                    send_telegram(f"🔒 No-overnight cutoff: force-closed {closed} open position(s).")
+                    notify(f"🔒 No-overnight cutoff: force-closed {closed} open position(s).")
                 last_force_close_date = now.date()
 
             if tick % SCAN_EVERY_N_TICKS == 0:
+                ok_count = 0
                 for pair in PAIRS:
                     try:
                         process_pair(pair, engine_state, seeded, now)
+                        ok_count += 1
                     except Exception:
                         print(f"Error processing {pair}:", traceback.format_exc())
                 save_state(state)
+                open_count = broker.open_positions_count()
+                # Visible heartbeat: a live console should show SOME proof of
+                # life every ~60s, not just the one-time startup line — this
+                # is the difference between "confirmed scanning" and "assumed
+                # scanning because nothing crashed."
+                print(f"[{now.isoformat(timespec='seconds')}] Scan cycle: {ok_count}/{len(PAIRS)} pairs OK, {open_count} open position(s), connected={broker.is_connected()}")
 
             # Runs every ~1s regardless of the scan cadence above, so the
             # app's balance/equity/open-position numbers feel truly live even
