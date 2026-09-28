@@ -13,7 +13,7 @@ optional headline-only $ -> £ display toggle. Kept unrenamed to avoid
 touching every read site in docs/index.html and dashboard_sync.py.
 """
 import traceback
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 import MetaTrader5 as mt5
 import firebase_admin
@@ -131,15 +131,29 @@ def sync_to_firebase(journal_data: dict | None = None) -> dict:
 
     closed_now = fb_open_tickets - open_tickets
     if closed_now:
-        deals = mt5.history_deals_get(datetime.now(timezone.utc) - timedelta(days=2), datetime.now(timezone.utc) + timedelta(minutes=5)) or []
-        deals_by_position: dict[int, list] = {}
-        for d in deals:
-            deals_by_position.setdefault(d.position_id, []).append(d)
-
         for ticket in closed_now:
             info = all_trades.get(str(ticket), {})
-            pos_deals = deals_by_position.get(ticket, [])
+
+            # Query deals for THIS position directly, rather than fetching a
+            # time-windowed batch and grouping by position_id — that batched
+            # approach was CONFIRMED to silently miss a position's deals at
+            # least once (a real -$46.30 EURCAD loss got recorded as a $0
+            # "win" because deals_by_position.get(ticket) came back empty at
+            # the exact moment this ticket was detected as closed). Querying
+            # directly by position is authoritative and side-steps whatever
+            # timing/window edge case caused that.
+            pos_deals = mt5.history_deals_get(position=ticket) or []
             close_deal = next((d for d in pos_deals if d.entry == mt5.DEAL_ENTRY_OUT), None)
+
+            if not pos_deals:
+                # No deal data yet for a position MT5 no longer shows as
+                # open — do NOT record a fake $0 result. Leave it as "open"
+                # in Firebase and retry next cycle (~1s later), once MT5's
+                # history has caught up. Confirmed via direct testing that
+                # this can happen transiently.
+                print(f"Reconcile: ticket {ticket} closed but no deal history found yet — deferring to next cycle, not recording a result.")
+                continue
+
             profit = sum(d.profit + d.swap + d.commission for d in pos_deals)
 
             if info.get("force_closed"):
@@ -147,20 +161,12 @@ def sync_to_firebase(journal_data: dict | None = None) -> dict:
                 # hit — label distinctly so Signals/win-rate aren't skewed.
                 status = "manual"
             elif profit != 0:
-                # Real dollar P&L is unambiguous ground truth — a trade that
-                # lost real money is a loss, full stop. Previously this was
-                # OVERRIDDEN by a price-vs-recorded-SL comparison, which
-                # could flip a large real loss to "tp" whenever the recorded
-                # SL didn't match the position's true state at close (e.g.
-                # on a netting-mode account, where repeated entries into the
-                # same symbol merge into one growing position and the SL
-                # recorded from an earlier, smaller version of that position
-                # no longer reflects it). Confirmed live: a real -$46.30
-                # EURCAD loss was being logged as a win this way.
+                # Real dollar P&L is unambiguous ground truth.
                 status = "sl" if profit < 0 else "tp"
             else:
-                # Exact breakeven close (rare) — no P&L sign to trust, fall
-                # back to price-vs-recorded-SL only for this edge case.
+                # Exact breakeven close (rare, and now backed by real deal
+                # data, not an empty-lookup artifact) — no P&L sign to
+                # trust, fall back to price-vs-recorded-SL for this case only.
                 status = "tp"
                 if close_deal is not None and info.get("sl"):
                     close_price = close_deal.price
@@ -297,17 +303,21 @@ def reconcile() -> list[str]:
 
 
 def reclassify_existing(journal_data: dict) -> int:
-    """One-time-per-startup correction: fixes any already-closed trade (in
-    Firebase's /trades and/or the local journal) whose stored tp/sl status
-    contradicts its own stored pnl sign.
+    """One-time-per-startup correction, two passes:
 
-    Exists because the classifier bug just fixed above (price-vs-recorded-SL
-    could override real dollar profit) already wrote WRONG statuses for
-    trades closed before that fix — including into the local journal, since
-    backfill_journal_from_firebase() copied those same wrong statuses over
-    before this correction existed. Real P&L sign is unambiguous ground
-    truth, so this is safe to run every startup (idempotent — trades already
-    correctly labeled are left untouched).
+    1. Any closed trade whose stored tp/sl status contradicts its own
+       stored pnl sign gets its STATUS corrected (the classifier-override
+       bug fixed above).
+    2. Any closed trade with pnl EXACTLY 0 gets RE-FETCHED from MT5 by
+       position ticket (mt5.history_deals_get(position=ticket)) and its
+       real profit + correct status restored. A genuine $0.00 close on a
+       real trade is essentially impossible — this is the signature of the
+       "empty deal lookup" bug also fixed above (a real -$46.30 EURCAD
+       loss was stored as pnl=0, status='tp' this exact way). Both
+       Firebase and the local journal (which may have copied the corrupted
+       value via backfill) get repaired.
+
+    Safe to run every startup — already-correct trades are untouched.
     """
     fixed = 0
     try:
@@ -316,7 +326,19 @@ def reclassify_existing(journal_data: dict) -> int:
         for ticket_str, t in all_trades.items():
             if t.get("status") not in ("tp", "sl"):
                 continue
+
             pnl = t.get("pnl_gbp")
+            if pnl == 0:
+                real_deals = mt5.history_deals_get(position=int(ticket_str)) or []
+                if real_deals:
+                    real_profit = round(sum(d.profit + d.swap + d.commission for d in real_deals), 2)
+                    if real_profit != 0:
+                        real_status = "sl" if real_profit < 0 else "tp"
+                        db.reference(f"/trades/{ticket_str}").update({"pnl_gbp": real_profit, "status": real_status})
+                        print(f"Repaired corrupted zero-pnl record: ticket {ticket_str} ({t.get('pair')}) was pnl_gbp=0/{t.get('status')} -> {real_profit}/{real_status}")
+                        fixed += 1
+                        continue  # already corrected both fields, skip the sign-only check below
+
             if pnl is None:
                 continue
             correct = "sl" if pnl < 0 else "tp"
@@ -327,10 +349,25 @@ def reclassify_existing(journal_data: dict) -> int:
         print("Firebase reclassification pass failed:", traceback.format_exc())
 
     journal_changed = False
-    for rec in journal_data.values():
+    for ticket_str, rec in journal_data.items():
         if rec.get("status") not in ("tp", "sl"):
             continue
+
         pnl = rec.get("pnl")
+        if pnl == 0:
+            try:
+                real_deals = mt5.history_deals_get(position=int(ticket_str)) or []
+            except Exception:
+                real_deals = []
+            if real_deals:
+                real_profit = round(sum(d.profit + d.swap + d.commission for d in real_deals), 2)
+                if real_profit != 0:
+                    rec["pnl"] = real_profit
+                    rec["status"] = "sl" if real_profit < 0 else "tp"
+                    fixed += 1
+                    journal_changed = True
+                    continue
+
         if pnl is None:
             continue
         correct = "sl" if pnl < 0 else "tp"
