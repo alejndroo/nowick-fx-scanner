@@ -157,7 +157,6 @@ def main() -> None:
     state = load_state()
     engine_state = state.setdefault("engine_state", {})
     seeded = state.setdefault("seeded", {})
-    last_force_close_date = None
     tick = 0
     SCAN_EVERY_N_TICKS = 60  # candle-scanning stays on its original ~60s cadence
 
@@ -179,17 +178,11 @@ def main() -> None:
                     time.sleep(1)
                     continue
 
-            if now.hour >= config.FORCE_CLOSE_HOUR_UTC and last_force_close_date != now.date():
-                tickets = [p.ticket for p in (mt5.positions_get() or []) if p.magic == broker.MAGIC]
-                if tickets:
-                    try:
-                        firebase_push.mark_force_closing(tickets)
-                    except Exception:
-                        print("mark_force_closing failed:", traceback.format_exc())
-                closed = broker.close_all()
-                if closed:
-                    notify(f"🔒 No-overnight cutoff: force-closed {closed} open position(s).")
-                last_force_close_date = now.date()
+            # No forced overnight close: open positions are left to run to
+            # their own SL/TP, whenever that happens. Only NEW entries are
+            # time-gated — engine.py's own session filter (07:00-20:45 UTC)
+            # already stops new signals from arming outside that window,
+            # so nothing extra is needed here for that half.
 
             if tick % SCAN_EVERY_N_TICKS == 0:
                 ok_count = 0

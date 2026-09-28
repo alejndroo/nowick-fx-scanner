@@ -19,11 +19,10 @@ RISK_PCT_MIN = 0.15
 RISK_PCT_MAX = 0.20
 MAX_OPEN_TRADES = 6      # bot will not open a new trade while this many of its own are open (any mix of pairs)
 
-# Safety net matching the "no overnight holding" rule: force-close every
-# position this bot opened once UTC reaches this hour, even if SL/TP hasn't
-# been hit yet. Session signals only fire 07:00-20:45 UTC (London open to
-# 15 min before NY close), so 21:00 gives a clean buffer past that.
-FORCE_CLOSE_HOUR_UTC = 21
+# No overnight force-close: open positions run to their own SL/TP whenever
+# that happens, including overnight/across sessions. Only NEW entries are
+# time-gated, via engine.py's own session filter (07:00-20:45 UTC), not by
+# anything in this file.
 
 # --- Optional: Telegram confirmations (reuse the same bot/chat as the signal bot) ---
 TELEGRAM_BOT_TOKEN = ""  # leave "" to disable
