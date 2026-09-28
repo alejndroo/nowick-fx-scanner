@@ -6,7 +6,9 @@ name: Dashboard Sync
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Offset from round minutes for the same reason as scan.yml — avoids
+    # the global pile-up on :00/:05/:10 etc.
+    - cron: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"
   workflow_dispatch: {}
 
 concurrency:

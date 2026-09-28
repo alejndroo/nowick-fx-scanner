@@ -2,8 +2,12 @@ name: Nowick FX Scan
 
 on:
   schedule:
-    # Every 15 minutes, 24/7 — aligned to candle closes.
-    - cron: "*/15 * * * *"
+    # Every 15 minutes, 24/7. Offset to :04/:19/:34/:49 (not the round
+    # :00/:15/:30/:45 marks) — GitHub's own docs warn that scheduled
+    # workflows can be delayed or dropped under high load, and load peaks
+    # hardest exactly on the round minutes every other repo also schedules
+    # on. Signal detection logic is unaffected; only the trigger timing changed.
+    - cron: "4,19,34,49 * * * *"
   workflow_dispatch: {}  # allows manual "Run workflow" button for testing
 
 permissions:
