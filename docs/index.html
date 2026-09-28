@@ -142,6 +142,7 @@
   .sig-status.open{ color:var(--bull); }
   .sig-status.win{ color:var(--bull); }
   .sig-status.loss{ color:var(--bear); }
+  .sig-status.manual{ color:var(--text-dim); }
   .dir-pill{ font-family:'IBM Plex Mono',monospace; font-size:9px; padding:2px 7px; border-radius:6px; letter-spacing:.04em; margin-right:6px; }
   .dir-pill.buy{ color:var(--bull); background:var(--bull-glow); }
   .dir-pill.sell{ color:var(--bear); background:var(--bear-glow); }
@@ -389,7 +390,7 @@
   onValue(ref(dbase, '.info/connected'), (snap)=> connectedPill(snap.val() === true));
 
   onValue(ref(dbase, '/live'), (snap)=>{ state.live = snap.val() || {}; renderHome(); renderCalendarSummary(); });
-  onValue(ref(dbase, '/account'), (snap)=>{ state.account = snap.val() || {}; renderAccount(); });
+  onValue(ref(dbase, '/account'), (snap)=>{ state.account = snap.val() || {}; renderAccount(); renderHome(); });
   onValue(ref(dbase, '/trades'), (snap)=>{ state.trades = snap.val() || {}; renderHome(); renderSignals(); renderCalendar(); });
   onValue(ref(dbase, '/calendar'), (snap)=>{ state.calendar = snap.val() || {}; renderCalendar(); renderCalendarSummary(); renderSpark(); });
   onValue(ref(dbase, '/top_pairs'), (snap)=>{ state.topPairs = snap.val() || []; renderTopPairs(); });
@@ -529,7 +530,7 @@
     document.getElementById('allTimeTotal').textContent = showGbp ? fmtSymbolValue(allTimeVal*rate,'£') : fmtUSD(allTimeVal);
 
     const tradeEntries = Object.entries(state.trades||{});
-    const closedCount = tradeEntries.filter(([,t])=>t.status==='tp'||t.status==='sl').length;
+    const closedCount = tradeEntries.filter(([,t])=>t.status==='tp'||t.status==='sl'||t.status==='manual').length;
     document.getElementById('tradeCount').textContent = closedCount + ' trade' + (closedCount===1?'':'s');
 
     renderOpenTrades(tradeEntries.filter(([,t])=>t.status==='open'));
@@ -647,9 +648,10 @@
     entries.forEach(([key, t])=>{
       seen.add(key);
       const isOpen = t.status === 'open';
+      const isManual = t.status === 'manual';
       const isWin = t.status === 'tp';
-      const statusLabel = isOpen ? 'OPEN' : (isWin ? 'WIN' : 'LOSS');
-      const statusClass = isOpen ? 'open' : (isWin ? 'win' : 'loss');
+      const statusLabel = isOpen ? 'OPEN' : (isManual ? 'CLOSED' : (isWin ? 'WIN' : 'LOSS'));
+      const statusClass = isOpen ? 'open' : (isManual ? 'manual' : (isWin ? 'win' : 'loss'));
       const when = isOpen ? (t.opened_at||'') : (t.closed_at||'');
 
       let entry = container.__nodes[key];
@@ -677,12 +679,16 @@
           whenEl: div.querySelector('.when-v'),
           pnlEl: div.querySelector('.pnl'),
         };
-        entry.entryEl.onclick = ()=>copyVal(t.entry??'', 'Entry');
-        entry.slEl.parentElement.onclick = ()=>copyVal(t.sl??'', 'SL');
-        entry.tpEl.parentElement.onclick = ()=>copyVal(t.tp??'', 'TP');
         entry.entryEl.parentElement.style.cursor = entry.slEl.parentElement.style.cursor = entry.tpEl.parentElement.style.cursor = 'pointer';
         container.__nodes[key] = entry;
       }
+
+      // Reassigned every render (not just on card creation) so these always
+      // copy the CURRENT trade's values, not whatever they were when the
+      // card was first built.
+      entry.entryEl.parentElement.onclick = ()=>copyVal(t.entry??'', 'Entry');
+      entry.slEl.parentElement.onclick = ()=>copyVal(t.sl??'', 'SL');
+      entry.tpEl.parentElement.onclick = ()=>copyVal(t.tp??'', 'TP');
 
       entry.el.classList.toggle('open', isOpen);
       entry.dirEl.textContent = t.dir;
@@ -693,7 +699,7 @@
       entry.entryEl.textContent = t.entry ?? '—';
       entry.slEl.textContent = t.sl ?? '—';
       entry.tpEl.textContent = t.tp ?? '—';
-      entry.whenEl.textContent = timeAgo(when) + (isOpen?'':' · '+(isWin?'Hit TP':'Hit SL'));
+      entry.whenEl.textContent = timeAgo(when) + (isOpen?'':(isManual?' · Scheduled close':' · '+(isWin?'Hit TP':'Hit SL')));
       entry.pnlEl.textContent = fmtUSD(t.pnl_gbp||0);
       entry.pnlEl.className = 'pnl ' + ((t.pnl_gbp||0)>=0?'pos':'neg');
 

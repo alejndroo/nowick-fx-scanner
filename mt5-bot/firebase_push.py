@@ -46,40 +46,67 @@ def usd_gbp_rate() -> float | None:
     return round(1.0 / tick.bid, 6)
 
 
-def sync_to_firebase(known_tickets: dict) -> dict:
+def get_risk_pct(default: float) -> float:
+    """Reads the dashboard's Risk % field so it's an actual live control,
+    not just a display. Firebase stores it as a percentage (e.g. 15), config
+    stores a fraction (0.15) — converts and sanity-checks, falling back to
+    `default` (config.RISK_PCT) if unset, unreadable, or out of range.
+    """
+    init_firebase()
+    try:
+        val = db.reference("/account/risk_pct").get()
+        if val is None:
+            return default
+        pct = float(val)
+        if not (0 < pct <= 100):
+            return default
+        return pct / 100.0
+    except Exception:
+        return default
+
+
+def mark_force_closing(tickets: list[int]) -> None:
+    """Call right before broker.close_all() for the no-overnight cutoff, so
+    the closure handler below can label these as a scheduled close instead
+    of a fake TP/SL hit.
+    """
+    init_firebase()
+    for t in tickets:
+        db.reference(f"/trades/{t}").update({"force_closed": True})
+
+
+def sync_to_firebase(_unused: dict | None = None) -> dict:
     """Call this once per bot.py loop iteration.
 
-    known_tickets: {ticket: {"sl", "tp", "dir", "pair", "opened_at"}},
-    carried across calls (bot.py owns the dict and passes it back in each
-    time) so a position that disappears between iterations can be looked up
-    in MT5's trade history to record its real close price/profit.
-    Returns the updated dict — always reassign the return value.
+    Firebase's own /trades node (not local process memory) is the source of
+    truth for "which tickets are currently open" — this makes closure
+    detection correct even across a bot restart, since in-memory state
+    would otherwise forget a position that closed while the bot was down
+    and leave it permanently stuck showing "open" on the dashboard.
+
+    Return value is unused; kept only so existing call sites that do
+    `known_tickets = sync_to_firebase(known_tickets)` don't need to change.
     """
     init_firebase()
 
     account = mt5.account_info()
     if account is None:
-        return known_tickets
+        return {}
 
     positions = mt5.positions_get() or []
     our_positions = [p for p in positions if p.magic == broker.MAGIC]
     open_tickets = {p.ticket for p in our_positions}
 
     trades_ref = db.reference("/trades")
+    all_trades = trades_ref.get() or {}
+    fb_open_tickets = {int(k) for k, v in all_trades.items() if v.get("status") == "open"}
 
     for p in our_positions:
         pair_display = p.symbol[:-len(config.SYMBOL_SUFFIX)] if config.SYMBOL_SUFFIX and p.symbol.endswith(config.SYMBOL_SUFFIX) else p.symbol
         risk_dist = abs(p.price_open - p.sl) if p.sl else None
         r_multiple = round(p.profit / (risk_dist * p.volume * 100000), 3) if risk_dist else 0.0
-        prior = known_tickets.get(p.ticket)
-        if prior is not None:
-            opened_at = prior.get("opened_at")
-        else:
-            # Not in memory — likely a restart. Firebase already has this
-            # trade's real opened_at from before the restart (synced every
-            # ~10s), so recover it from there instead of resetting the clock.
-            existing = trades_ref.child(str(p.ticket)).get() or {}
-            opened_at = existing.get("opened_at") or datetime.now(timezone.utc).isoformat(timespec="seconds")
+        existing = all_trades.get(str(p.ticket), {})
+        opened_at = existing.get("opened_at") or datetime.now(timezone.utc).isoformat(timespec="seconds")
         trades_ref.child(str(p.ticket)).update({
             "pair": pair_display,
             "dir": "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL",
@@ -89,13 +116,8 @@ def sync_to_firebase(known_tickets: dict) -> dict:
             "pnl_gbp": round(p.profit, 2),
             "r_multiple": r_multiple,
         })
-        known_tickets[p.ticket] = {
-            "sl": p.sl, "tp": p.tp,
-            "dir": "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL",
-            "pair": pair_display, "opened_at": opened_at,
-        }
 
-    closed_now = [t for t in known_tickets if t not in open_tickets]
+    closed_now = fb_open_tickets - open_tickets
     if closed_now:
         deals = mt5.history_deals_get(datetime.now(timezone.utc) - timedelta(days=2), datetime.now(timezone.utc) + timedelta(minutes=5)) or []
         deals_by_position: dict[int, list] = {}
@@ -103,17 +125,24 @@ def sync_to_firebase(known_tickets: dict) -> dict:
             deals_by_position.setdefault(d.position_id, []).append(d)
 
         for ticket in closed_now:
-            info = known_tickets.pop(ticket)
+            info = all_trades.get(str(ticket), {})
             pos_deals = deals_by_position.get(ticket, [])
             close_deal = next((d for d in pos_deals if d.entry == mt5.DEAL_ENTRY_OUT), None)
-            profit = sum(d.profit for d in pos_deals)
-            status = "tp" if profit >= 0 else "sl"
-            if close_deal is not None and info.get("sl"):
-                close_price = close_deal.price
-                if info["dir"] == "BUY":
-                    status = "sl" if close_price <= info["sl"] + 1e-9 else "tp"
-                else:
-                    status = "sl" if close_price >= info["sl"] - 1e-9 else "tp"
+            profit = sum(d.profit + d.swap + d.commission for d in pos_deals)
+
+            if info.get("force_closed"):
+                # Flattened by the no-overnight cutoff, not a real TP/SL
+                # hit — label distinctly so Signals/win-rate aren't skewed.
+                status = "manual"
+            else:
+                status = "tp" if profit >= 0 else "sl"
+                if close_deal is not None and info.get("sl"):
+                    close_price = close_deal.price
+                    if info.get("dir") == "BUY":
+                        status = "sl" if close_price <= info["sl"] + 1e-9 else "tp"
+                    else:
+                        status = "sl" if close_price >= info["sl"] - 1e-9 else "tp"
+
             trades_ref.child(str(ticket)).update({
                 "status": status,
                 "closed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -121,10 +150,13 @@ def sync_to_firebase(known_tickets: dict) -> dict:
             })
 
     floating = sum(p.profit for p in our_positions)
+    withdrawals = db.reference("/withdrawals").get() or {}
+    total_withdrawn = sum(float(w.get("amount", 0)) for w in withdrawals.values())
     db.reference("/account").update({
         "balance_gbp": round(account.balance, 2),
         "equity_usd": round(account.equity, 2),
         "floating_pnl_gbp": round(floating, 2),
+        "total_withdrawn_gbp": round(total_withdrawn, 2),
         "currency": account.currency,
     })
 
@@ -135,12 +167,15 @@ def sync_to_firebase(known_tickets: dict) -> dict:
     if rate:
         db.reference("/fx").update({"usd_gbp": rate, "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
 
-    return known_tickets
+    return {}
 
 
 def _rebuild_calendar_and_aggregates() -> None:
     trades = db.reference("/trades").get() or {}
-    closed = [t for t in trades.values() if t.get("status") in ("tp", "sl") and t.get("closed_at")]
+    # "manual" (no-overnight cutoff) closes are still real realized P&L and
+    # must count toward totals/calendar — they're excluded from win-rate
+    # client-side by checking status in ("tp","sl") there instead.
+    closed = [t for t in trades.values() if t.get("status") in ("tp", "sl", "manual") and t.get("closed_at")]
 
     by_day: dict[str, float] = {}
     by_pair: dict[str, float] = {}

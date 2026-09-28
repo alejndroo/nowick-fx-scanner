@@ -97,7 +97,8 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime) -> 
         if account is None:
             send_telegram("❌ Could not read account info — skipping this signal.")
             continue
-        risk_amount = account.equity * config.RISK_PCT
+        risk_pct = firebase_push.get_risk_pct(config.RISK_PCT)
+        risk_amount = account.equity * risk_pct
 
         try:
             lots = broker.lots_for_risk(symbol, risk_amount, risk_distance)
@@ -128,7 +129,7 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime) -> 
                 f"Entry: `{res['price']:.{d}f}`\n"
                 f"SL: `{sl:.{d}f}`\n"
                 f"TP: `{tp:.{d}f}`\n"
-                f"Risk: {config.RISK_PCT * 100:.0f}% equity"
+                f"Risk: {risk_pct * 100:.0f}% equity"
             )
         except Exception as e:
             send_telegram(f"❌ Order failed for {display_symbol(pair)} {sig['dir']}: {e}")
@@ -143,7 +144,6 @@ def main() -> None:
     engine_state = state.setdefault("engine_state", {})
     seeded = state.setdefault("seeded", {})
     last_force_close_date = None
-    known_tickets: dict = {}
     tick = 0
     SCAN_EVERY_N_TICKS = 60  # candle-scanning stays on its original ~60s cadence
 
@@ -152,6 +152,12 @@ def main() -> None:
             now = datetime.now(timezone.utc)
 
             if now.hour >= config.FORCE_CLOSE_HOUR_UTC and last_force_close_date != now.date():
+                tickets = [p.ticket for p in (mt5.positions_get() or []) if p.magic == broker.MAGIC]
+                if tickets:
+                    try:
+                        firebase_push.mark_force_closing(tickets)
+                    except Exception:
+                        print("mark_force_closing failed:", traceback.format_exc())
                 closed = broker.close_all()
                 if closed:
                     send_telegram(f"🔒 No-overnight cutoff: force-closed {closed} open position(s).")
@@ -169,7 +175,7 @@ def main() -> None:
             # app's balance/equity/open-position numbers feel truly live even
             # though new M15 candles only matter once a minute.
             try:
-                known_tickets = firebase_push.sync_to_firebase(known_tickets)
+                firebase_push.sync_to_firebase()
             except Exception:
                 print("Firebase sync failed:", traceback.format_exc())
 
