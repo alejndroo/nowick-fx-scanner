@@ -75,8 +75,22 @@ def fetch_candles(symbol: str, granularity: str, count: int) -> list[dict]:
     return out
 
 
-def lots_for_risk(symbol: str, risk_amount: float, sl_distance_price: float) -> float:
-    """Position size so a full SL hit loses exactly `risk_amount` (account currency)."""
+def lots_for_risk(symbol: str, risk_amount: float, sl_distance_price: float, max_risk_amount: float | None = None) -> float:
+    """Position size so a full SL hit loses exactly `risk_amount` (account currency).
+
+    max_risk_amount, if given, is a hard safety ceiling: after sizing (and
+    after the unavoidable rounding up to the broker's volume_min, which can
+    itself sometimes risk more than intended on a small account), the
+    PREDICTED worst-case dollar loss is checked against it and the call
+    raises rather than silently placing an oversized trade. This exists
+    because a real trade was confirmed to lose far more than any configured
+    risk_pct should have allowed (a -$46.30 EURCAD loss on an account where
+    even 20% risk should have capped it well below that) — root cause
+    wasn't conclusively pinned down (could be a sizing edge case for that
+    signal's specific risk_distance, could be real SL slippage on the fill,
+    which MT5 does not guarantee an exact price for), so this makes the
+    failure mode structurally impossible going forward regardless of cause.
+    """
     info = mt5.symbol_info(symbol)
     if info is None:
         raise RuntimeError(f"symbol_info failed for {symbol}")
@@ -92,7 +106,18 @@ def lots_for_risk(symbol: str, risk_amount: float, sl_distance_price: float) -> 
     step = info.volume_step or 0.01
     lots = round(lots / step) * step
     lots = max(info.volume_min, min(info.volume_max, lots))
-    return round(lots, 2)
+    lots = round(lots, 2)
+
+    predicted_loss = lots * loss_per_lot
+    print(f"  [sizing] {symbol}: risk_amount={risk_amount:.2f} sl_dist={sl_distance_price:.6f} "
+          f"loss_per_lot={loss_per_lot:.4f} -> lots={lots} predicted_worst_case_loss={predicted_loss:.2f}")
+    if max_risk_amount is not None and predicted_loss > max_risk_amount:
+        raise RuntimeError(
+            f"position sizing exceeded safety ceiling for {symbol}: predicted worst-case loss "
+            f"{predicted_loss:.2f} > ceiling {max_risk_amount:.2f} (lots={lots}, broker volume_min={info.volume_min}) "
+            f"— refusing this trade rather than risking more than approved"
+        )
+    return lots
 
 
 def open_positions_count(magic: int = MAGIC) -> int:

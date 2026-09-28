@@ -145,8 +145,22 @@ def sync_to_firebase(journal_data: dict | None = None) -> dict:
                 # Flattened by the no-overnight cutoff, not a real TP/SL
                 # hit — label distinctly so Signals/win-rate aren't skewed.
                 status = "manual"
+            elif profit != 0:
+                # Real dollar P&L is unambiguous ground truth — a trade that
+                # lost real money is a loss, full stop. Previously this was
+                # OVERRIDDEN by a price-vs-recorded-SL comparison, which
+                # could flip a large real loss to "tp" whenever the recorded
+                # SL didn't match the position's true state at close (e.g.
+                # on a netting-mode account, where repeated entries into the
+                # same symbol merge into one growing position and the SL
+                # recorded from an earlier, smaller version of that position
+                # no longer reflects it). Confirmed live: a real -$46.30
+                # EURCAD loss was being logged as a win this way.
+                status = "sl" if profit < 0 else "tp"
             else:
-                status = "tp" if profit >= 0 else "sl"
+                # Exact breakeven close (rare) — no P&L sign to trust, fall
+                # back to price-vs-recorded-SL only for this edge case.
+                status = "tp"
                 if close_deal is not None and info.get("sl"):
                     close_price = close_deal.price
                     if info.get("dir") == "BUY":
@@ -243,6 +257,43 @@ def backfill_journal_from_firebase(journal_data: dict) -> int:
     if added:
         journal_mod.save_journal(journal_data)
     return added
+
+
+def reconcile() -> list[str]:
+    """Compares real MT5 state against what Firebase (and therefore the
+    dashboard) currently shows, and returns a list of plain-text mismatch
+    descriptions — empty list means they agree. This exists so drift gets
+    caught automatically instead of only when someone happens to check by
+    hand, per a direct request after a display/reality mismatch was found.
+    """
+    problems = []
+    try:
+        init_firebase()
+        positions = mt5.positions_get() or []
+        mt5_open_tickets = {p.ticket for p in positions if p.magic == broker.MAGIC}
+
+        all_trades = db.reference("/trades").get() or {}
+        fb_open_tickets = {int(k) for k, v in all_trades.items() if v.get("status") == "open"}
+
+        missing_in_fb = mt5_open_tickets - fb_open_tickets
+        stale_in_fb = fb_open_tickets - mt5_open_tickets
+        if missing_in_fb:
+            problems.append(f"{len(missing_in_fb)} position(s) open in MT5 but NOT shown as open in Firebase: {sorted(missing_in_fb)}")
+        if stale_in_fb:
+            problems.append(f"{len(stale_in_fb)} ticket(s) shown open in Firebase but NOT actually open in MT5: {sorted(stale_in_fb)}")
+
+        account = mt5.account_info()
+        fb_account = db.reference("/account").get() or {}
+        if account is not None and fb_account.get("balance_gbp") is not None:
+            balance_diff = abs(account.balance - fb_account["balance_gbp"])
+            if balance_diff > 1.0:  # more than $1 apart is real drift, not just a mid-sync snapshot gap
+                problems.append(f"Balance mismatch: MT5={account.balance:.2f} vs Firebase={fb_account['balance_gbp']:.2f} (diff {balance_diff:.2f})")
+    except Exception:
+        import traceback
+        print("Reconciliation check failed:", traceback.format_exc())
+        problems.append("Reconciliation check itself failed to run (see console traceback above) — treat this as unverified, not as 'all clear'.")
+
+    return problems
 
 
 def push_insights(plan: dict) -> None:

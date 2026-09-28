@@ -140,11 +140,15 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime, pla
             continue
         risk_pct = firebase_push.get_risk_pct(plan["risk_pct"])
         risk_amount = account.equity * risk_pct
+        # Hard ceiling independent of the risk_pct calculation above — 25%
+        # headroom over the approved max, purely as a structural backstop
+        # against a sizing bug or bad SL fill, never meant to bind normally.
+        safety_ceiling = account.equity * config.RISK_PCT_MAX * 1.25
 
         try:
-            lots = broker.lots_for_risk(symbol, risk_amount, risk_distance)
+            lots = broker.lots_for_risk(symbol, risk_amount, risk_distance, max_risk_amount=safety_ceiling)
         except Exception as e:
-            notify(f"❌ Position sizing failed for {display_symbol(pair)}: {e}")
+            notify(f"❌ Position sizing refused/failed for {display_symbol(pair)}: {e}")
             continue
 
         # Anchor SL/TP to the REAL fill price, not the historical retest level
@@ -209,6 +213,7 @@ def main() -> None:
     day_start_balance = state.get("day_start_balance")
     day_start_date = state.get("day_start_date")
     daily_limit_notified_date = None
+    last_reconcile_problems: list = []
 
     while True:
         try:
@@ -250,6 +255,17 @@ def main() -> None:
                     firebase_push.push_insights(plan)
                 except Exception:
                     print("Planner failed (falling back to last known plan):", traceback.format_exc())
+
+                try:
+                    problems = firebase_push.reconcile()
+                except Exception:
+                    problems = ["Reconciliation call itself raised — see traceback."]
+                    print("Reconcile call failed:", traceback.format_exc())
+                if problems and problems != last_reconcile_problems:
+                    notify("⚠️ Dashboard/MT5 mismatch detected:\n" + "\n".join(f"- {p}" for p in problems))
+                elif not problems and last_reconcile_problems:
+                    notify("✅ Dashboard/MT5 mismatch resolved — back in sync.")
+                last_reconcile_problems = problems
 
                 if plan.get("daily_loss_limit_hit") and daily_limit_notified_date != today_str:
                     notify(f"🛑 Daily loss limit hit ({plan.get('today_realized_pnl')} realized) — no new entries until tomorrow. Open positions are unaffected.")
