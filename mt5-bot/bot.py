@@ -145,7 +145,7 @@ def main() -> None:
     last_force_close_date = None
     known_tickets: dict = {}
     tick = 0
-    SCAN_EVERY_N_TICKS = 6  # candle-scanning stays on its original ~60s cadence
+    SCAN_EVERY_N_TICKS = 60  # candle-scanning stays on its original ~60s cadence
 
     while True:
         try:
@@ -165,8 +165,8 @@ def main() -> None:
                         print(f"Error processing {pair}:", traceback.format_exc())
                 save_state(state)
 
-            # Runs every ~10s regardless of the scan cadence above, so the
-            # app's balance/equity/open-position numbers stay near-live even
+            # Runs every ~1s regardless of the scan cadence above, so the
+            # app's balance/equity/open-position numbers feel truly live even
             # though new M15 candles only matter once a minute.
             try:
                 known_tickets = firebase_push.sync_to_firebase(known_tickets)
@@ -177,7 +177,7 @@ def main() -> None:
             print("Loop error:", traceback.format_exc())
 
         tick += 1
-        time.sleep(10)
+        time.sleep(1)
 
 
 if __name__ == "__main__":
