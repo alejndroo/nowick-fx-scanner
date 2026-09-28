@@ -141,7 +141,7 @@
   },
   "history": [],
   "last_update_id": 867185123,
-  "last_run_utc": "2026-09-27T22:57:56+00:00",
+  "last_run_utc": "2026-09-28T00:18:55+00:00",
   "consecutive_full_failures": 0,
   "outage_alerted": false,
   "engine_state": {
@@ -156,12 +156,12 @@
     },
     "GBP_CAD": {
       "trend": -1,
-      "swing_low": 1.87116,
+      "swing_low": 1.87104,
       "swing_high": 1.87542,
       "watch_dir": 0,
       "watch_level": 1.87186,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "CAD_JPY": {
       "trend": -1,
@@ -183,12 +183,12 @@
     },
     "EUR_GBP": {
       "trend": 1,
-      "swing_low": 0.85994,
-      "swing_high": 0.86122,
+      "swing_low": 0.85977,
+      "swing_high": 0.86035,
       "watch_dir": 0,
       "watch_level": 0.85976,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "EUR_USD": {
       "trend": -1,
@@ -197,7 +197,7 @@
       "watch_dir": 0,
       "watch_level": 1.13726,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "NZD_JPY": {
       "trend": -1,
@@ -219,21 +219,21 @@
     },
     "EUR_CHF": {
       "trend": 1,
-      "swing_low": 0.94368,
+      "swing_low": 0.94294,
       "swing_high": 0.94442,
       "watch_dir": 0,
       "watch_level": 0.94404,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "EUR_AUD": {
       "trend": 1,
-      "swing_low": 1.6199,
-      "swing_high": 1.6251,
+      "swing_low": 1.6201,
+      "swing_high": 1.62355,
       "watch_dir": 0,
       "watch_level": 1.62174,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "USD_JPY": {
       "trend": 1,
@@ -242,7 +242,7 @@
       "watch_dir": 0,
       "watch_level": 157.654,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "CHF_JPY": {
       "trend": -1,
@@ -260,16 +260,16 @@
       "watch_dir": 0,
       "watch_level": 0.56667,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "AUD_JPY": {
       "trend": -1,
-      "swing_low": 110.448,
+      "swing_low": 110.239,
       "swing_high": 110.624,
       "watch_dir": 0,
       "watch_level": 111.068,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "GBP_JPY": {
       "trend": -1,
@@ -282,12 +282,12 @@
     },
     "EUR_JPY": {
       "trend": -1,
-      "swing_low": 179.043,
+      "swing_low": 178.942,
       "swing_high": 180.303,
       "watch_dir": 0,
       "watch_level": 179.856,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "NZD_CAD": {
       "trend": -1,
@@ -300,21 +300,21 @@
     },
     "NZD_CHF": {
       "trend": -1,
-      "swing_low": 0.46883,
+      "swing_low": 0.46861,
       "swing_high": 0.4695,
       "watch_dir": 0,
       "watch_level": 0.4698,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "GBP_NZD": {
       "trend": 1,
-      "swing_low": 2.33588,
+      "swing_low": 2.33764,
       "swing_high": 2.34154,
       "watch_dir": 0,
       "watch_level": 2.3372200000000003,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "USD_CHF": {
       "trend": 1,
@@ -323,16 +323,16 @@
       "watch_dir": 0,
       "watch_level": 0.8280799999999999,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "EUR_NZD": {
       "trend": 1,
-      "swing_low": 2.00938,
+      "swing_low": 2.0105,
       "swing_high": 2.01507,
       "watch_dir": 0,
       "watch_level": 2.00866,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "AUD_USD": {
       "trend": -1,
@@ -341,16 +341,16 @@
       "watch_dir": 0,
       "watch_level": 0.70394,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "AUD_NZD": {
       "trend": 1,
-      "swing_low": 1.23909,
-      "swing_high": 1.24144,
+      "swing_low": 1.23876,
+      "swing_high": 1.24129,
       "watch_dir": 0,
       "watch_level": 1.23938,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "AUD_CAD": {
       "trend": -1,
@@ -377,7 +377,7 @@
       "watch_dir": 0,
       "watch_level": 0.58574,
       "watch_bars_left": 0,
-      "seeded_through": "2026-09-27T22:30:00.000000000Z"
+      "seeded_through": "2026-09-28T00:00:00.000000000Z"
     },
     "GBP_AUD": {
       "trend": 1,
@@ -390,33 +390,33 @@
     }
   },
   "pair_failures": {
-    "GBP_CHF": 0,
+    "GBP_CHF": 1,
     "GBP_CAD": 0,
-    "CAD_JPY": 0,
-    "EUR_CAD": 0,
+    "CAD_JPY": 1,
+    "EUR_CAD": 1,
     "EUR_GBP": 0,
     "EUR_USD": 0,
-    "NZD_JPY": 0,
-    "AUD_CHF": 0,
+    "NZD_JPY": 1,
+    "AUD_CHF": 1,
     "EUR_CHF": 0,
     "EUR_AUD": 0,
     "USD_JPY": 0,
-    "CHF_JPY": 0,
+    "CHF_JPY": 1,
     "NZD_USD": 0,
     "AUD_JPY": 0,
-    "GBP_JPY": 0,
+    "GBP_JPY": 1,
     "EUR_JPY": 0,
-    "NZD_CAD": 0,
+    "NZD_CAD": 1,
     "NZD_CHF": 0,
     "GBP_NZD": 0,
     "USD_CHF": 0,
     "EUR_NZD": 0,
     "AUD_USD": 0,
     "AUD_NZD": 0,
-    "AUD_CAD": 0,
-    "USD_CAD": 0,
+    "AUD_CAD": 1,
+    "USD_CAD": 1,
     "CAD_CHF": 0,
-    "GBP_AUD": 0
+    "GBP_AUD": 1
   },
   "pair_failure_alerted": {}
 }
