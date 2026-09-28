@@ -28,12 +28,26 @@ Open `config.py` and fill in:
   Navigator panel in MT5 -> it's shown there, e.g. `ICMarketsSC-Live01`)
 - `SYMBOL_SUFFIX` — leave blank unless your broker's Market Watch shows
   pairs like `EURUSD.m` instead of plain `EURUSD` — check there first
-- `RISK_PCT` — set to `0.25` for 25% of equity per trade (you asked for
-  20-30%), or `0.20`/`0.30` for the edges of that range
+- `RISK_PCT` — currently `0.15` (15% of equity per trade)
 - `MAX_OPEN_TRADES` — already set to `3`
 - `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` — optional, paste the same
   values used for the signal bot if you want trade-execution confirmations
   in the same Telegram chat
+
+## 2b. Connect it to the iPhone dashboard (live, no manual steps)
+
+This bot pushes every trade, your balance, and P&L straight to Firebase —
+the same database the dashboard app reads — every ~10 seconds. No more
+"I took this trade" button; the dashboard just mirrors your real account.
+
+1. Firebase console -> gear icon -> **Project settings** -> **Service accounts**
+2. Click **Generate new private key** -> confirm -> a `.json` file downloads
+3. Rename it to `firebase-service-account.json` and put it in this same
+   folder (`C:\NowickBot\`), next to `bot.py`
+4. `config.py`'s `FIREBASE_DB_URL` is already set correctly — leave it
+
+**Never share that JSON file or commit it anywhere** — it's a real
+credential for your Firebase project (it is NOT included in this zip/repo).
 
 ## 3. Run it
 

@@ -20,6 +20,7 @@ import requests
 
 import config
 import mt5_broker as broker
+import firebase_push
 from engine import run_engine
 from pairs import PAIRS, pip_size, display_symbol
 
@@ -142,6 +143,9 @@ def main() -> None:
     engine_state = state.setdefault("engine_state", {})
     seeded = state.setdefault("seeded", {})
     last_force_close_date = None
+    known_tickets: dict = {}
+    tick = 0
+    SCAN_EVERY_N_TICKS = 6  # candle-scanning stays on its original ~60s cadence
 
     while True:
         try:
@@ -153,18 +157,27 @@ def main() -> None:
                     send_telegram(f"🔒 No-overnight cutoff: force-closed {closed} open position(s).")
                 last_force_close_date = now.date()
 
-            for pair in PAIRS:
-                try:
-                    process_pair(pair, engine_state, seeded, now)
-                except Exception:
-                    print(f"Error processing {pair}:", traceback.format_exc())
+            if tick % SCAN_EVERY_N_TICKS == 0:
+                for pair in PAIRS:
+                    try:
+                        process_pair(pair, engine_state, seeded, now)
+                    except Exception:
+                        print(f"Error processing {pair}:", traceback.format_exc())
+                save_state(state)
 
-            save_state(state)
+            # Runs every ~10s regardless of the scan cadence above, so the
+            # app's balance/equity/open-position numbers stay near-live even
+            # though new M15 candles only matter once a minute.
+            try:
+                known_tickets = firebase_push.sync_to_firebase(known_tickets)
+            except Exception:
+                print("Firebase sync failed:", traceback.format_exc())
 
         except Exception:
             print("Loop error:", traceback.format_exc())
 
-        time.sleep(60)
+        tick += 1
+        time.sleep(10)
 
 
 if __name__ == "__main__":

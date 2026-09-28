@@ -23,3 +23,9 @@ FORCE_CLOSE_HOUR_UTC = 21
 # --- Optional: Telegram confirmations (reuse the same bot/chat as the signal bot) ---
 TELEGRAM_BOT_TOKEN = ""  # leave "" to disable
 TELEGRAM_CHAT_ID = ""
+
+# --- Dashboard (Firebase) ---
+# Path to the service-account JSON file (Firebase console -> Project settings
+# -> Service accounts -> Generate new private key), placed next to bot.py.
+FIREBASE_SERVICE_ACCOUNT_PATH = "firebase-service-account.json"
+FIREBASE_DB_URL = "https://fxapp-fc0bc-default-rtdb.firebaseio.com"
