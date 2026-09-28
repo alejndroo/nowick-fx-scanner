@@ -87,6 +87,10 @@
   .ccy-toggle{ display:flex; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; font-family:'IBM Plex Mono',monospace; font-size:9px; }
   .ccy-toggle span{ padding:3px 7px; color:var(--text-faint); cursor:pointer; }
   .ccy-toggle span.on{ background:var(--bull); color:var(--bg); font-weight:700; }
+  .mode-toggle-row{ display:flex; justify-content:center; margin-top:2px; }
+  .mode-toggle{ display:flex; background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden; font-family:'IBM Plex Mono',monospace; font-size:10px; }
+  .mode-toggle span{ padding:6px 14px; color:var(--text-faint); cursor:pointer; }
+  .mode-toggle span.on{ background:var(--violet); color:#fff; font-weight:700; }
 
   .pnl-value{ display:flex; align-items:baseline; justify-content:center; font-family:'Sora',sans-serif; font-weight:700; font-size:44px; letter-spacing:-0.01em; margin-top:8px; color:var(--bull); filter:drop-shadow(0 0 24px var(--bull-glow)); animation:glowBreathe 3.2s ease-in-out infinite; }
   .pnl-value.neg{ color:var(--bear); filter:drop-shadow(0 0 24px var(--bear-glow)); }
@@ -229,13 +233,16 @@
     <!-- HOME -->
     <div class="view active" id="view-home">
       <div class="pnl-block">
+        <div class="mode-toggle-row">
+          <div class="mode-toggle"><span id="modeBalance" class="on" onclick="setMode('balance')">Balance</span><span id="modePnl" onclick="setMode('pnl')">P&amp;L</span></div>
+        </div>
         <div class="pnl-label-row">
-          <div class="pnl-label" id="pnlLabel">P&amp;L · This Week</div>
+          <div class="pnl-label" id="pnlLabel">Account Balance</div>
           <div class="ccy-toggle"><span id="ccyUsd" class="on" onclick="setCcy(false)">$</span><span id="ccyGbp" onclick="setCcy(true)">£</span></div>
         </div>
         <div class="pnl-value" id="pnlValue"></div>
         <div class="pnl-delta" id="pnlDelta">Waiting for live data…</div>
-        <div class="range-tabs" id="rangeTabs">
+        <div class="range-tabs" id="rangeTabs" style="display:none;">
           <div class="range-indicator" id="rangeIndicator"></div>
           <div class="range-tab" data-range="1D" onclick="setRange('1D',this)">1D</div>
           <div class="range-tab" data-range="1W" onclick="setRange('1W',this)">1W</div>
@@ -352,6 +359,21 @@
   let currentRange = 'ALL';
   let calViewDate = new Date();
   let showGbp = (localStorage.getItem('nowick_ccy') === 'gbp');
+  let homeMode = (localStorage.getItem('nowick_mode') === 'pnl') ? 'pnl' : 'balance';
+
+  window.setMode = function(m){
+    homeMode = m;
+    localStorage.setItem('nowick_mode', m);
+    document.getElementById('modeBalance').classList.toggle('on', m==='balance');
+    document.getElementById('modePnl').classList.toggle('on', m==='pnl');
+    document.getElementById('rangeTabs').style.display = m==='pnl' ? 'flex' : 'none';
+    if(m==='pnl') requestAnimationFrame(()=>positionRangeIndicator());
+    renderHome();
+    renderSpark();
+  };
+  document.getElementById('modeBalance').classList.toggle('on', homeMode==='balance');
+  document.getElementById('modePnl').classList.toggle('on', homeMode==='pnl');
+  document.getElementById('rangeTabs').style.display = homeMode==='pnl' ? 'flex' : 'none';
 
   function fmtUSD(n){
     const s = Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -476,44 +498,92 @@
   }
 
   function renderHome(){
-    const val = rangeValue();
     const el = document.getElementById('pnlValue');
+    const floating = (state.account && state.account.floating_pnl_gbp) || 0;
+    const updatedBase = state.live.updated_at ? 'Updated ' + new Date(state.live.updated_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : 'Waiting for live data…';
+
+    let val;
+    if(homeMode === 'balance'){
+      val = (state.account && state.account.balance_gbp) || 0;
+      document.getElementById('pnlLabel').textContent = 'Account Balance';
+      const equity = (state.account && state.account.equity_usd);
+      let d = updatedBase;
+      if(equity != null) d += ' · Equity ' + fmtUSD(equity);
+      if(floating !== 0) d += ' · ' + (floating>=0?'+':'') + fmtUSD(floating) + ' floating';
+      document.getElementById('pnlDelta').textContent = d;
+    } else {
+      val = rangeValue();
+      document.getElementById('pnlLabel').textContent = 'P&L · ' + ({'1D':'Today','1W':'This Week','1M':'This Month','ALL':'All Time'}[currentRange]);
+      // The headline number is always the TOTAL (closed trades in range + any
+      // currently-open floating P&L) — never just the open-trade amount on
+      // its own. This subtitle is a secondary detail, never a replacement.
+      document.getElementById('pnlDelta').textContent = floating !== 0 ? updatedBase + ' · incl. ' + fmtUSD(floating) + ' floating' : updatedBase;
+    }
+
     el.classList.toggle('neg', val < 0);
     const h = headlineFmt(val);
     updateOdometer(el, showGbp ? val*((state.fx&&state.fx.usd_gbp)||0.79) : val, h.symbol);
-
-    document.getElementById('pnlLabel').textContent = 'P&L · ' + ({'1D':'Today','1W':'This Week','1M':'This Month','ALL':'All Time'}[currentRange]);
-    const delta = document.getElementById('pnlDelta');
-    const floating = (state.account && state.account.floating_pnl_gbp) || 0;
-    // The headline number is always the TOTAL (closed trades in range + any
-    // currently-open floating P&L) — never just the open-trade amount on its
-    // own. This subtitle is a secondary detail, never a replacement for it.
-    const base = state.live.updated_at ? 'Updated ' + new Date(state.live.updated_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : 'Waiting for live data…';
-    delta.textContent = floating !== 0 ? base + ' · incl. ' + fmtUSD(floating) + ' floating' : base;
 
     const allTimeVal = state.live.all_time_gbp || 0;
     const rate = (state.fx && state.fx.usd_gbp) || 0.79;
     document.getElementById('allTimeTotal').textContent = showGbp ? fmtSymbolValue(allTimeVal*rate,'£') : fmtUSD(allTimeVal);
 
-    const trades = Object.values(state.trades||{});
-    const closedCount = trades.filter(t=>t.status==='tp'||t.status==='sl').length;
+    const tradeEntries = Object.entries(state.trades||{});
+    const closedCount = tradeEntries.filter(([,t])=>t.status==='tp'||t.status==='sl').length;
     document.getElementById('tradeCount').textContent = closedCount + ' trade' + (closedCount===1?'':'s');
 
-    const openList = document.getElementById('openTradesList');
-    const open = trades.filter(t=>t.status==='open');
-    if(open.length===0){ openList.innerHTML = '<div class="empty-state">No open positions right now</div>'; }
-    else {
-      openList.innerHTML = open.map((t,i)=>{
-        const pos = t.pnl_gbp >= 0;
-        return `<div class="trade-open-card anim-in" style="animation-delay:${i*0.05}s; background:var(--surface); border:1px solid rgba(138,107,255,0.35); border-radius:16px; padding:14px 16px; margin-bottom:10px;">
-          <div style="display:flex; align-items:center; justify-content:space-between;">
-            <div><span class="dir-pill ${t.dir==='BUY'?'buy':'sell'}">${t.dir}</span><b>${t.pair}</b></div>
-            <div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:15px; color:${pos?'var(--bull)':'var(--bear)'}">${fmtUSD(t.pnl_gbp)} (${t.r_multiple>=0?'+':''}${t.r_multiple}R)</div>
-          </div>
-          <div style="font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-faint); margin-top:6px;">Entry ${t.entry} · SL ${t.sl} · TP ${t.tp}</div>
-        </div>`;
-      }).join('');
+    renderOpenTrades(tradeEntries.filter(([,t])=>t.status==='open'));
+  }
+
+  // Incremental renderer: reuses one DOM node per trade id across renders so
+  // a value-only update (P&L ticking every ~1s) never re-triggers the card's
+  // entrance animation or causes the list to visibly jump/reflow.
+  function renderOpenTrades(openEntries){
+    const container = document.getElementById('openTradesList');
+    if(openEntries.length === 0){
+      container.__nodes = null;
+      if(!container.querySelector('.empty-state')) container.innerHTML = '<div class="empty-state">No open positions right now</div>';
+      return;
     }
+    container.__nodes = container.__nodes || {};
+    const seen = new Set();
+    let prevEl = null;
+    openEntries.forEach(([key, t])=>{
+      seen.add(key);
+      let entry = container.__nodes[key];
+      if(!entry){
+        const div = document.createElement('div');
+        div.className = 'trade-open-card anim-in';
+        div.style.cssText = 'background:var(--surface); border:1px solid rgba(138,107,255,0.35); border-radius:16px; padding:14px 16px; margin-bottom:10px;';
+        div.innerHTML = `<div style="display:flex; align-items:center; justify-content:space-between;">
+            <div><span class="dir-pill"></span><b class="t-pair"></b></div>
+            <div class="t-pnl" style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:15px;"></div>
+          </div>
+          <div class="t-meta" style="font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-faint); margin-top:6px;"></div>`;
+        entry = {
+          el: div,
+          dirEl: div.querySelector('.dir-pill'),
+          pairEl: div.querySelector('.t-pair'),
+          pnlEl: div.querySelector('.t-pnl'),
+          metaEl: div.querySelector('.t-meta'),
+        };
+        container.__nodes[key] = entry;
+      }
+      entry.dirEl.textContent = t.dir;
+      entry.dirEl.className = 'dir-pill ' + (t.dir==='BUY'?'buy':'sell');
+      entry.pairEl.textContent = t.pair;
+      const pos = t.pnl_gbp >= 0;
+      entry.pnlEl.textContent = `${fmtUSD(t.pnl_gbp)} (${t.r_multiple>=0?'+':''}${t.r_multiple}R)`;
+      entry.pnlEl.style.color = pos ? 'var(--bull)' : 'var(--bear)';
+      entry.metaEl.textContent = `Entry ${t.entry} · SL ${t.sl} · TP ${t.tp}`;
+
+      if(prevEl){ if(prevEl.nextSibling !== entry.el) container.insertBefore(entry.el, prevEl.nextSibling); }
+      else if(container.firstChild !== entry.el){ container.insertBefore(entry.el, container.firstChild); }
+      prevEl = entry.el;
+    });
+    Object.keys(container.__nodes).forEach(k=>{
+      if(!seen.has(k)){ container.__nodes[k].el.remove(); delete container.__nodes[k]; }
+    });
   }
 
   function renderTopPairs(){
@@ -560,35 +630,80 @@
   }
 
   function renderSignals(){
-    const list = document.getElementById('signalsList');
+    const container = document.getElementById('signalsList');
     const entries = Object.entries(state.trades||{}).sort((a,b)=>{
       const ta = a[1].closed_at || a[1].opened_at || '';
       const tb = b[1].closed_at || b[1].opened_at || '';
       return tb.localeCompare(ta);
     }).slice(0,30);
-    if(entries.length===0){ list.innerHTML = '<div class="empty-state">Waiting for the next trade…</div>'; return; }
-    list.innerHTML = entries.map(([key,t],i)=>{
+    if(entries.length===0){
+      container.__nodes = null;
+      if(!container.querySelector('.empty-state')) container.innerHTML = '<div class="empty-state">Waiting for the next trade…</div>';
+      return;
+    }
+    container.__nodes = container.__nodes || {};
+    const seen = new Set();
+    let prevEl = null;
+    entries.forEach(([key, t])=>{
+      seen.add(key);
       const isOpen = t.status === 'open';
       const isWin = t.status === 'tp';
       const statusLabel = isOpen ? 'OPEN' : (isWin ? 'WIN' : 'LOSS');
       const statusClass = isOpen ? 'open' : (isWin ? 'win' : 'loss');
       const when = isOpen ? (t.opened_at||'') : (t.closed_at||'');
-      return `<div class="sig-card anim-in ${isOpen?'open':''}" style="animation-delay:${i*0.04}s;">
-        <div class="sig-top">
-          <div class="sig-pair"><span class="dir-pill ${t.dir==='BUY'?'buy':'sell'}">${t.dir}</span><span class="pair-name">${t.pair}</span></div>
-          <div class="sig-status ${statusClass}">${isOpen?'<span class="dot" style="width:5px;height:5px;"></span>':''}${statusLabel}</div>
-        </div>
-        <div class="sig-grid">
-          <div class="sig-stat" onclick="copyVal('${t.entry??''}','Entry')"><div class="k">⧉ Entry</div><div class="v">${t.entry??'—'}</div></div>
-          <div class="sig-stat sl" onclick="copyVal('${t.sl??''}','SL')"><div class="k">⧉ SL</div><div class="v">${t.sl??'—'}</div></div>
-          <div class="sig-stat tp" onclick="copyVal('${t.tp??''}','TP')"><div class="k">⧉ TP</div><div class="v">${t.tp??'—'}</div></div>
-        </div>
-        <div class="sig-meta">
-          <span>${timeAgo(when)}${isOpen?'':' · '+(isWin?'Hit TP':'Hit SL')}</span>
-          <span class="pnl ${((t.pnl_gbp||0)>=0)?'pos':'neg'}">${fmtUSD(t.pnl_gbp||0)}</span>
-        </div>
-      </div>`;
-    }).join('');
+
+      let entry = container.__nodes[key];
+      if(!entry){
+        const div = document.createElement('div');
+        div.className = 'sig-card anim-in';
+        div.innerHTML = `<div class="sig-top">
+            <div class="sig-pair"><span class="dir-pill"></span><span class="pair-name"></span></div>
+            <div class="sig-status"></div>
+          </div>
+          <div class="sig-grid">
+            <div class="sig-stat"><div class="k">⧉ Entry</div><div class="v entry-v"></div></div>
+            <div class="sig-stat sl"><div class="k">⧉ SL</div><div class="v sl-v"></div></div>
+            <div class="sig-stat tp"><div class="k">⧉ TP</div><div class="v tp-v"></div></div>
+          </div>
+          <div class="sig-meta"><span class="when-v"></span><span class="pnl"></span></div>`;
+        entry = {
+          el: div,
+          dirEl: div.querySelector('.dir-pill'),
+          pairEl: div.querySelector('.pair-name'),
+          statusEl: div.querySelector('.sig-status'),
+          entryEl: div.querySelector('.entry-v'),
+          slEl: div.querySelector('.sl-v'),
+          tpEl: div.querySelector('.tp-v'),
+          whenEl: div.querySelector('.when-v'),
+          pnlEl: div.querySelector('.pnl'),
+        };
+        entry.entryEl.onclick = ()=>copyVal(t.entry??'', 'Entry');
+        entry.slEl.parentElement.onclick = ()=>copyVal(t.sl??'', 'SL');
+        entry.tpEl.parentElement.onclick = ()=>copyVal(t.tp??'', 'TP');
+        entry.entryEl.parentElement.style.cursor = entry.slEl.parentElement.style.cursor = entry.tpEl.parentElement.style.cursor = 'pointer';
+        container.__nodes[key] = entry;
+      }
+
+      entry.el.classList.toggle('open', isOpen);
+      entry.dirEl.textContent = t.dir;
+      entry.dirEl.className = 'dir-pill ' + (t.dir==='BUY'?'buy':'sell');
+      entry.pairEl.textContent = t.pair;
+      entry.statusEl.className = 'sig-status ' + statusClass;
+      entry.statusEl.innerHTML = (isOpen?'<span class="dot" style="width:5px;height:5px;"></span>':'') + statusLabel;
+      entry.entryEl.textContent = t.entry ?? '—';
+      entry.slEl.textContent = t.sl ?? '—';
+      entry.tpEl.textContent = t.tp ?? '—';
+      entry.whenEl.textContent = timeAgo(when) + (isOpen?'':' · '+(isWin?'Hit TP':'Hit SL'));
+      entry.pnlEl.textContent = fmtUSD(t.pnl_gbp||0);
+      entry.pnlEl.className = 'pnl ' + ((t.pnl_gbp||0)>=0?'pos':'neg');
+
+      if(prevEl){ if(prevEl.nextSibling !== entry.el) container.insertBefore(entry.el, prevEl.nextSibling); }
+      else if(container.firstChild !== entry.el){ container.insertBefore(entry.el, container.firstChild); }
+      prevEl = entry.el;
+    });
+    Object.keys(container.__nodes).forEach(k=>{
+      if(!seen.has(k)){ container.__nodes[k].el.remove(); delete container.__nodes[k]; }
+    });
   }
 
   window.copyVal = function(val, label){
@@ -711,6 +826,8 @@
   updateGreeting();
   setInterval(updateGreeting, 5 * 60 * 1000);
 
+  renderHome();
+  renderSignals();
   renderCalendar();
   requestAnimationFrame(()=>{ positionRangeIndicator(); positionTabIndicator(document.querySelector('.tab.on')); });
   window.addEventListener('resize', ()=>{ positionRangeIndicator(); positionTabIndicator(document.querySelector('.tab.on')); });
