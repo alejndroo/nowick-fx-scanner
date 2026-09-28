@@ -102,15 +102,24 @@ def open_positions_count(magic: int = MAGIC) -> int:
     return sum(1 for p in positions if p.magic == magic)
 
 
+# The MetaTrader5 Python package doesn't expose SYMBOL_FILLING_FOK/IOC as
+# named attributes even though the bitmask values are stable/documented in
+# the underlying MQL5 API — using mt5.SYMBOL_FILLING_IOC raises
+# AttributeError (confirmed live: this crashed every single order until
+# fixed). Using the raw bit values directly instead.
+_SYMBOL_FILLING_FOK = 1
+_SYMBOL_FILLING_IOC = 2
+
+
 def _filling_type(info) -> int:
     """Brokers only accept specific fill modes per symbol (a bitmask on
     symbol_info.filling_mode) — hardcoding IOC silently fails every single
     order on any broker/symbol that doesn't support it. Prefer IOC, then
     FOK, then fall back to RETURN (always accepted)."""
     mode = info.filling_mode
-    if mode & mt5.SYMBOL_FILLING_IOC:
+    if mode & _SYMBOL_FILLING_IOC:
         return mt5.ORDER_FILLING_IOC
-    if mode & mt5.SYMBOL_FILLING_FOK:
+    if mode & _SYMBOL_FILLING_FOK:
         return mt5.ORDER_FILLING_FOK
     return mt5.ORDER_FILLING_RETURN
 
