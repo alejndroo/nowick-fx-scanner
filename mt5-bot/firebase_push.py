@@ -12,6 +12,7 @@ MT5 account's own currency (USD). Only /fx/usd_gbp is pushed for the app's
 optional headline-only $ -> £ display toggle. Kept unrenamed to avoid
 touching every read site in docs/index.html and dashboard_sync.py.
 """
+import traceback
 from datetime import datetime, timezone, timedelta
 
 import MetaTrader5 as mt5
@@ -289,11 +290,58 @@ def reconcile() -> list[str]:
             if balance_diff > 1.0:  # more than $1 apart is real drift, not just a mid-sync snapshot gap
                 problems.append(f"Balance mismatch: MT5={account.balance:.2f} vs Firebase={fb_account['balance_gbp']:.2f} (diff {balance_diff:.2f})")
     except Exception:
-        import traceback
         print("Reconciliation check failed:", traceback.format_exc())
         problems.append("Reconciliation check itself failed to run (see console traceback above) — treat this as unverified, not as 'all clear'.")
 
     return problems
+
+
+def reclassify_existing(journal_data: dict) -> int:
+    """One-time-per-startup correction: fixes any already-closed trade (in
+    Firebase's /trades and/or the local journal) whose stored tp/sl status
+    contradicts its own stored pnl sign.
+
+    Exists because the classifier bug just fixed above (price-vs-recorded-SL
+    could override real dollar profit) already wrote WRONG statuses for
+    trades closed before that fix — including into the local journal, since
+    backfill_journal_from_firebase() copied those same wrong statuses over
+    before this correction existed. Real P&L sign is unambiguous ground
+    truth, so this is safe to run every startup (idempotent — trades already
+    correctly labeled are left untouched).
+    """
+    fixed = 0
+    try:
+        init_firebase()
+        all_trades = db.reference("/trades").get() or {}
+        for ticket_str, t in all_trades.items():
+            if t.get("status") not in ("tp", "sl"):
+                continue
+            pnl = t.get("pnl_gbp")
+            if pnl is None:
+                continue
+            correct = "sl" if pnl < 0 else "tp"
+            if t.get("status") != correct:
+                db.reference(f"/trades/{ticket_str}/status").set(correct)
+                fixed += 1
+    except Exception:
+        print("Firebase reclassification pass failed:", traceback.format_exc())
+
+    journal_changed = False
+    for rec in journal_data.values():
+        if rec.get("status") not in ("tp", "sl"):
+            continue
+        pnl = rec.get("pnl")
+        if pnl is None:
+            continue
+        correct = "sl" if pnl < 0 else "tp"
+        if rec.get("status") != correct:
+            rec["status"] = correct
+            fixed += 1
+            journal_changed = True
+    if journal_changed:
+        journal_mod.save_journal(journal_data)
+
+    return fixed
 
 
 def push_insights(plan: dict) -> None:

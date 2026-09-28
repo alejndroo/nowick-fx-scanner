@@ -203,6 +203,12 @@ def main() -> None:
             print(f"Journal backfill: pulled {added} historical trade(s) from Firebase — the planner learns from these too, not just new ones.")
     except Exception:
         print("Journal backfill failed (non-fatal, continuing):", traceback.format_exc())
+    try:
+        fixed = firebase_push.reclassify_existing(journal_data)
+        if fixed:
+            print(f"Reclassification: corrected {fixed} trade(s) whose stored win/loss label contradicted their own real profit/loss.")
+    except Exception:
+        print("Reclassification pass failed (non-fatal, continuing):", traceback.format_exc())
     tick = 0
     SCAN_EVERY_N_TICKS = 60  # candle-scanning stays on its original ~60s cadence
     # The plan is recomputed every scan cycle (not just at startup) so it
