@@ -320,6 +320,7 @@ def reclassify_existing(journal_data: dict) -> int:
     Safe to run every startup — already-correct trades are untouched.
     """
     fixed = 0
+    firebase_fixed = 0
     try:
         init_firebase()
         all_trades = db.reference("/trades").get() or {}
@@ -337,6 +338,7 @@ def reclassify_existing(journal_data: dict) -> int:
                         db.reference(f"/trades/{ticket_str}").update({"pnl_gbp": real_profit, "status": real_status})
                         print(f"Repaired corrupted zero-pnl record: ticket {ticket_str} ({t.get('pair')}) was pnl_gbp=0/{t.get('status')} -> {real_profit}/{real_status}")
                         fixed += 1
+                        firebase_fixed += 1
                         continue  # already corrected both fields, skip the sign-only check below
 
             if pnl is None:
@@ -345,6 +347,18 @@ def reclassify_existing(journal_data: dict) -> int:
             if t.get("status") != correct:
                 db.reference(f"/trades/{ticket_str}/status").set(correct)
                 fixed += 1
+                firebase_fixed += 1
+
+        if firebase_fixed:
+            # The calendar/top-pairs/live totals are aggregates BUILT FROM
+            # these records at the time they closed — fixing a record's own
+            # status/pnl doesn't retroactively recompute them. Without this,
+            # the dashboard's calendar keeps showing stale pre-repair
+            # numbers (confirmed live: showed -$0.56 for the month when the
+            # real corrected total was -$27.31) even after the underlying
+            # data is correct.
+            _rebuild_calendar_and_aggregates()
+            print(f"Rebuilt calendar/top-pairs/live totals after repairing {firebase_fixed} record(s).")
     except Exception:
         print("Firebase reclassification pass failed:", traceback.format_exc())
 
