@@ -80,9 +80,10 @@ def test_trade(pair: str, direction: str) -> None:
     res = broker.place_order(symbol, direction, lots, sl, tp)
     print(f"Order filled: ticket {res['ticket']} at {res['price']}")
 
-    print("Closing it immediately to confirm the round trip...")
-    closed = broker.close_all()
-    print(f"Closed {closed} position(s). Test complete — execution pipeline works.")
+    print("Closing ONLY this test position (never touches any other open trade)...")
+    ok = broker.close_ticket(res["ticket"])
+    print(f"Closed: {ok}. Test complete — execution pipeline works." if ok
+          else f"WARNING: could not auto-close ticket {res['ticket']} — close it manually in MT5.")
 
 
 if __name__ == "__main__":

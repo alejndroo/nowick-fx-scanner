@@ -168,6 +168,38 @@ def place_order(symbol: str, direction: str, lots: float, sl: float, tp: float, 
     return {"ticket": result.order, "price": result.price}
 
 
+def close_ticket(ticket: int) -> bool:
+    """Closes ONE specific position by ticket — never touches any other
+    open position, unlike close_all(). Use this for anything that should
+    only affect a position it just opened itself (e.g. a connectivity test).
+    """
+    positions = mt5.positions_get(ticket=ticket)
+    if not positions:
+        return False
+    pos = positions[0]
+    tick = mt5.symbol_info_tick(pos.symbol)
+    info = mt5.symbol_info(pos.symbol)
+    if tick is None or info is None:
+        return False
+    close_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+    price = tick.bid if pos.type == mt5.ORDER_TYPE_BUY else tick.ask
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": pos.symbol,
+        "volume": pos.volume,
+        "type": close_type,
+        "position": pos.ticket,
+        "price": price,
+        "deviation": 20,
+        "magic": pos.magic,
+        "comment": "NowickBot close (single ticket)",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": _filling_type(info),
+    }
+    result = mt5.order_send(request)
+    return result is not None and result.retcode == mt5.TRADE_RETCODE_DONE
+
+
 def close_all(magic: int = MAGIC) -> int:
     """Force-flatten every open position this bot opened. Returns count closed."""
     positions = mt5.positions_get()
