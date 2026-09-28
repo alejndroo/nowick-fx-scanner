@@ -184,6 +184,67 @@ def sync_to_firebase(journal_data: dict | None = None) -> dict:
     return {}
 
 
+def backfill_journal_from_firebase(journal_data: dict) -> int:
+    """One-time-per-gap, idempotent catch-up: pulls any closed trade already
+    sitting in Firebase's /trades (from before journal.py existed, or from
+    any gap) into the local journal, so the planner learns from ALL real
+    trade history today, not just trades placed after this system was
+    added. Safe to call every startup — only adds tickets not already
+    present. Returns the number of records added.
+
+    Firebase's /trades stores "pair" in DISPLAY format ("EURUSD", no
+    underscore — see sync_to_firebase's pair_display) while the live
+    journal path (bot.py's process_pair -> journal.record_open) stores the
+    underscore OANDA-style format ("EUR_USD", matching pairs.PAIRS) that
+    the planner's pause-matching logic compares against. Converting here is
+    mandatory: without it, "EURUSD" and "EUR_USD" would silently become two
+    different pairs in the planner's stats — the exact kind of
+    format-mismatch bug that was specifically checked for and cleared on
+    the live path, so it must not get reintroduced here.
+    """
+    try:
+        init_firebase()
+        all_trades = db.reference("/trades").get() or {}
+    except Exception:
+        print("Journal backfill: could not reach Firebase, skipping this attempt.")
+        return 0
+
+    added = 0
+    for ticket_str, t in all_trades.items():
+        if ticket_str in journal_data:
+            continue
+        if t.get("status") not in ("tp", "sl", "manual"):
+            continue  # only backfill trades with a known, final, real outcome
+
+        pair_display = t.get("pair") or ""
+        pair_underscore = f"{pair_display[:3]}_{pair_display[3:]}" if len(pair_display) == 6 else pair_display
+
+        opened_at_str = t.get("opened_at")
+        try:
+            opened_at = datetime.fromisoformat(opened_at_str) if opened_at_str else None
+        except ValueError:
+            opened_at = None
+
+        journal_data[ticket_str] = {
+            "pair": pair_underscore, "dir": t.get("dir"),
+            "entry": t.get("entry"), "sl": t.get("sl"), "tp": t.get("tp"),
+            "risk_pct": None,   # unknown for trades placed before this system existed
+            "atr_at_entry": None,
+            "session_hour_utc": opened_at.hour if opened_at else None,
+            "day_of_week": opened_at.strftime("%A") if opened_at else None,
+            "opened_at": opened_at_str,
+            "status": t.get("status"),
+            "pnl": t.get("pnl_gbp") or 0,  # rolling_stats' r.get("pnl", 0) only defaults on a MISSING key, not an explicit None
+            "closed_at": t.get("closed_at"),
+            "backfilled": True,
+        }
+        added += 1
+
+    if added:
+        journal_mod.save_journal(journal_data)
+    return added
+
+
 def push_insights(plan: dict) -> None:
     """Pushes the planner's current adaptive plan + reasoning to Firebase
     so the dashboard can show it — the point is that it's inspectable, not

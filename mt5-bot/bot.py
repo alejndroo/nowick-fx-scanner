@@ -193,6 +193,12 @@ def main() -> None:
     engine_state = state.setdefault("engine_state", {})
     seeded = state.setdefault("seeded", {})
     journal_data = journal.load_journal()
+    try:
+        added = firebase_push.backfill_journal_from_firebase(journal_data)
+        if added:
+            print(f"Journal backfill: pulled {added} historical trade(s) from Firebase — the planner learns from these too, not just new ones.")
+    except Exception:
+        print("Journal backfill failed (non-fatal, continuing):", traceback.format_exc())
     tick = 0
     SCAN_EVERY_N_TICKS = 60  # candle-scanning stays on its original ~60s cadence
     # The plan is recomputed every scan cycle (not just at startup) so it
