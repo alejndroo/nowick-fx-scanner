@@ -299,8 +299,19 @@
         <div class="acc-balance-label">Current Balance (USD)</div>
       </div>
       <div class="acc-card anim-in" style="text-align:left; animation-delay:.05s;">
-        <div class="acc-row"><span>Risk per trade</span><input id="riskPctInput" type="number" step="0.1" value="15" onchange="updateAccountSetting('risk_pct', this.value)"> %</div>
-        <div class="acc-row"><span>Max simultaneous trades</span><span class="r-val">6</span></div>
+        <div class="section-title" style="margin-bottom:2px;">AI Insights</div>
+        <div class="acc-sub" style="text-align:left; margin-bottom:12px;">Recomputed every ~60s. Every decision below has a plain-text reason — nothing here is a black box.</div>
+        <div class="acc-row"><span>Current risk %</span><span class="r-val" id="insRisk">—</span></div>
+        <div class="acc-row"><span>Recent streak</span><span class="r-val" id="insStreak">—</span></div>
+        <div class="acc-row"><span>Win rate (14d)</span><span class="r-val" id="insWinRate">—</span></div>
+        <div class="acc-row"><span>Paused pairs</span><span class="r-val" id="insPaused">none</span></div>
+        <div class="acc-row"><span>Daily loss limit</span><span class="r-val" id="insDailyLimit">OK</span></div>
+        <div id="insReasons" style="margin-top:10px; font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-faint); line-height:1.6;"></div>
+      </div>
+      <div class="acc-card anim-in" style="text-align:left; animation-delay:.08s;">
+        <div class="acc-row"><span>Risk override <span style="color:var(--text-faint); font-size:10px;">(blank = AI-adaptive)</span></span><input id="riskPctInput" type="number" step="0.1" placeholder="auto" onchange="updateAccountSetting('risk_pct', this.value)"> %</div>
+        <div style="margin-top:6px;"><button class="pressable" style="background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim); border-radius:8px; padding:6px 12px; font-family:'IBM Plex Mono',monospace; font-size:10px;" onclick="clearRiskOverride()">Clear override</button></div>
+        <div class="acc-row" style="margin-top:6px;"><span>Max simultaneous trades</span><span class="r-val">6</span></div>
         <div class="acc-row"><span>Total withdrawn</span><span class="r-val" id="totalWithdrawn">$0.00</span></div>
       </div>
       <div class="acc-card anim-in" style="text-align:left; animation-delay:.1s;">
@@ -356,7 +367,7 @@
   // every write site; they simply hold USD amounts now. Only the headline
   // P&L number (and the all-time total) can be toggled to an approximate
   // £ display using the live rate pushed to /fx/usd_gbp.
-  let state = { live:{}, account:{}, signals:{}, trades:{}, calendar:{}, topPairs:[], fx:{} };
+  let state = { live:{}, account:{}, signals:{}, trades:{}, calendar:{}, topPairs:[], fx:{}, insights:{} };
   let currentRange = 'ALL';
   let calViewDate = new Date();
   let showGbp = (localStorage.getItem('nowick_ccy') === 'gbp');
@@ -395,6 +406,7 @@
   onValue(ref(dbase, '/calendar'), (snap)=>{ state.calendar = snap.val() || {}; renderCalendar(); renderCalendarSummary(); renderSpark(); });
   onValue(ref(dbase, '/top_pairs'), (snap)=>{ state.topPairs = snap.val() || []; renderTopPairs(); });
   onValue(ref(dbase, '/fx'), (snap)=>{ state.fx = snap.val() || {}; renderHome(); });
+  onValue(ref(dbase, '/insights'), (snap)=>{ state.insights = snap.val() || {}; renderInsights(); });
 
   window.setCcy = function(gbp){
     showGbp = gbp;
@@ -771,13 +783,33 @@
     const a = state.account || {};
     document.getElementById('accBalance').textContent = fmtUSD(a.balance_gbp ?? 0);
     document.getElementById('totalWithdrawn').textContent = fmtUSD(a.total_withdrawn_gbp ?? 0);
-    if(document.activeElement.id !== 'riskPctInput') document.getElementById('riskPctInput').value = a.risk_pct ?? 15;
+    if(document.activeElement.id !== 'riskPctInput') document.getElementById('riskPctInput').value = a.risk_pct ?? '';
   }
 
   window.updateAccountSetting = function(key, val){
     set(ref(dbase, '/account/'+key), parseFloat(val));
-    toast('Saved');
+    toast('Override saved — AI plan is now bypassed for this field');
   };
+
+  window.clearRiskOverride = function(){
+    remove(ref(dbase, '/account/risk_pct'));
+    document.getElementById('riskPctInput').value = '';
+    toast('Cleared — back to AI-adaptive risk');
+  };
+
+  function renderInsights(){
+    const ins = state.insights || {};
+    document.getElementById('insRisk').textContent = ins.risk_pct != null ? (ins.risk_pct*100).toFixed(1)+'%' : '—';
+    const streak = ins.stats_snapshot ? ins.stats_snapshot.current_streak : null;
+    document.getElementById('insStreak').textContent = streak == null ? '—' : (streak > 0 ? `+${streak} wins` : streak < 0 ? `${streak} losses` : 'none');
+    const wr = ins.stats_snapshot ? ins.stats_snapshot.overall_win_rate : null;
+    document.getElementById('insWinRate').textContent = wr == null ? '—' : Math.round(wr*100)+'% ('+ins.stats_snapshot.n_closed_14d+' trades)';
+    document.getElementById('insPaused').textContent = (ins.paused_pairs && ins.paused_pairs.length) ? ins.paused_pairs.map(p=>p.replace('_','')).join(', ') : 'none';
+    const limitEl = document.getElementById('insDailyLimit');
+    limitEl.textContent = ins.daily_loss_limit_hit ? 'HIT — paused today' : 'OK';
+    limitEl.style.color = ins.daily_loss_limit_hit ? 'var(--bear)' : 'var(--bull)';
+    document.getElementById('insReasons').innerHTML = (ins.reasons || []).map(r=>`· ${r}`).join('<br>');
+  }
 
   window.doWithdraw = function(){
     const input = document.getElementById('withdrawAmount');
@@ -835,6 +867,7 @@
   renderHome();
   renderSignals();
   renderCalendar();
+  renderInsights();
   requestAnimationFrame(()=>{ positionRangeIndicator(); positionTabIndicator(document.querySelector('.tab.on')); });
   window.addEventListener('resize', ()=>{ positionRangeIndicator(); positionTabIndicator(document.querySelector('.tab.on')); });
 

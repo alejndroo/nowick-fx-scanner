@@ -19,6 +19,7 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 import config
+import journal as journal_mod
 import mt5_broker as broker
 
 _initialized = False
@@ -79,7 +80,7 @@ def mark_force_closing(tickets: list[int]) -> None:
         db.reference(f"/trades/{t}").update({"force_closed": True})
 
 
-def sync_to_firebase(_unused: dict | None = None) -> dict:
+def sync_to_firebase(journal_data: dict | None = None) -> dict:
     """Call this once per bot.py loop iteration.
 
     Firebase's own /trades node (not local process memory) is the source of
@@ -88,8 +89,10 @@ def sync_to_firebase(_unused: dict | None = None) -> dict:
     would otherwise forget a position that closed while the bot was down
     and leave it permanently stuck showing "open" on the dashboard.
 
-    Return value is unused; kept only so existing call sites that do
-    `known_tickets = sync_to_firebase(known_tickets)` don't need to change.
+    journal_data: bot.py's in-memory journal dict (same object it passes to
+    journal.record_open()) — when a close is detected here, the journal
+    gets the matching record_close() call so the planner's history stays
+    complete even though closes are detected in this module, not bot.py.
     """
     init_firebase()
 
@@ -151,11 +154,14 @@ def sync_to_firebase(_unused: dict | None = None) -> dict:
                     else:
                         status = "sl" if close_price >= info["sl"] - 1e-9 else "tp"
 
+            closed_at_dt = datetime.now(timezone.utc)
             trades_ref.child(str(ticket)).update({
                 "status": status,
-                "closed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "closed_at": closed_at_dt.isoformat(timespec="seconds"),
                 "pnl_gbp": round(profit, 2),
             })
+            if journal_data is not None:
+                journal_mod.record_close(journal_data, ticket, status, profit, closed_at_dt)
 
     floating = sum(p.profit for p in our_positions)
     withdrawals = db.reference("/withdrawals").get() or {}
@@ -176,6 +182,17 @@ def sync_to_firebase(_unused: dict | None = None) -> dict:
         db.reference("/fx").update({"usd_gbp": rate, "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
 
     return {}
+
+
+def push_insights(plan: dict) -> None:
+    """Pushes the planner's current adaptive plan + reasoning to Firebase
+    so the dashboard can show it — the point is that it's inspectable, not
+    a black box."""
+    try:
+        init_firebase()
+        db.reference("/insights").set(plan)
+    except Exception:
+        pass
 
 
 def _rebuild_calendar_and_aggregates() -> None:

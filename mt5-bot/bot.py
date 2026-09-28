@@ -1,17 +1,27 @@
 """Nowick MT5 auto-trader.
 
-Runs the exact same signal engine as the GitHub Actions bot (engine.py,
-pairs.py — byte-for-byte identical, copied unchanged from that repo) but
-instead of sending a Telegram alert, executes the trade directly on your
-MT5 account via the locally running MT5 terminal.
+Scans all 27 pairs with the Nowick signal engine (engine.py — kept
+byte-identical to the TradingView indicator's logic, always) and executes
+real trades directly on the connected MT5 account.
+
+Two adaptive layers sit around that fixed signal logic, never inside it:
+- planner.py, recomputed every scan cycle: chooses a risk % within the
+  approved RISK_PCT_MIN..MAX band based on the recent win/loss streak,
+  pauses individual pairs that are meaningfully underperforming, and can
+  halt all new entries for the rest of the day via a daily loss circuit
+  breaker. Every decision it makes is logged with a plain-text reason and
+  pushed to the dashboard — never a silent adjustment.
+- journal.py: a permanent record of every trade's full context (risk used,
+  session hour, day of week, ATR at entry, outcome), which is what the
+  planner actually reasons from.
 
 Must run on the Windows machine that has the MT5 terminal open and logged
-in. Leave this window open during trading hours (07:00-13:00 UTC, per the
-engine's session filter).
+in. New entries only fire 07:00-20:45 UTC (engine.py's own session filter,
+London open through 15 min before NY close) — open positions are NOT
+force-closed at any time; they run to their own SL/TP, including overnight.
 """
 import json
 import os
-import random
 import time
 import traceback
 from datetime import datetime, timezone
@@ -20,8 +30,10 @@ import MetaTrader5 as mt5
 import requests
 
 import config
+import journal
 import mt5_broker as broker
 import firebase_push
+import planner
 from engine import run_engine
 from pairs import PAIRS, pip_size, display_symbol
 
@@ -75,7 +87,7 @@ def digits_for(pair: str) -> int:
     return 3 if pair.endswith("JPY") else 5
 
 
-def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime) -> None:
+def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime, plan: dict, journal_data: dict) -> None:
     symbol = broker.mt5_symbol(pair, config.SYMBOL_SUFFIX)
     if mt5.symbol_info(symbol) is None:
         return  # not offered by this broker, or the suffix/name doesn't match
@@ -101,6 +113,12 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime) -> 
         if (now - sig_time).total_seconds() > STALE_SIGNAL_SECONDS:
             continue
 
+        if plan.get("daily_loss_limit_hit"):
+            continue  # the daily circuit breaker notification already happened once, in main() — no per-signal spam here
+
+        if pair in plan.get("paused_pairs", []):
+            continue  # planner: this pair's recent win rate is meaningfully below average, sitting out today
+
         if broker.open_positions_count() >= config.MAX_OPEN_TRADES:
             notify(f"⚠️ Skipped {display_symbol(pair)} {sig['dir']} — {config.MAX_OPEN_TRADES} trades already open.")
             continue
@@ -110,8 +128,7 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime) -> 
         if account is None:
             notify("❌ Could not read account info — skipping this signal.")
             continue
-        default_risk_pct = random.uniform(config.RISK_PCT_MIN, config.RISK_PCT_MAX)
-        risk_pct = firebase_push.get_risk_pct(default_risk_pct)
+        risk_pct = firebase_push.get_risk_pct(plan["risk_pct"])
         risk_amount = account.equity * risk_pct
 
         try:
@@ -136,17 +153,25 @@ def process_pair(pair: str, engine_state: dict, seeded: dict, now: datetime) -> 
 
         try:
             res = broker.place_order(symbol, sig["dir"], lots, sl, tp)
-            d = digits_for(pair)
-            notify(
-                f"✅ *{sig['dir']} {display_symbol(pair)}* executed\n"
-                f"Lots: {lots}\n"
-                f"Entry: `{res['price']:.{d}f}`\n"
-                f"SL: `{sl:.{d}f}`\n"
-                f"TP: `{tp:.{d}f}`\n"
-                f"Risk: {risk_pct * 100:.0f}% equity"
-            )
         except Exception as e:
             notify(f"❌ Order failed for {display_symbol(pair)} {sig['dir']}: {e}")
+            continue
+
+        d = digits_for(pair)
+        notify(
+            f"✅ *{sig['dir']} {display_symbol(pair)}* executed\n"
+            f"Lots: {lots}\n"
+            f"Entry: `{res['price']:.{d}f}`\n"
+            f"SL: `{sl:.{d}f}`\n"
+            f"TP: `{tp:.{d}f}`\n"
+            f"Risk: {risk_pct * 100:.0f}% equity"
+        )
+        try:
+            journal.record_open(journal_data, res["ticket"], pair, sig["dir"], res["price"], sl, tp, risk_pct, sig.get("atr"), now)
+        except Exception:
+            # The trade is real and already confirmed above — a journal
+            # write failure must never look like a failed order.
+            print(f"Journal write failed for ticket {res['ticket']}:", traceback.format_exc())
 
 
 def main() -> None:
@@ -157,8 +182,17 @@ def main() -> None:
     state = load_state()
     engine_state = state.setdefault("engine_state", {})
     seeded = state.setdefault("seeded", {})
+    journal_data = journal.load_journal()
     tick = 0
     SCAN_EVERY_N_TICKS = 60  # candle-scanning stays on its original ~60s cadence
+    # The plan is recomputed every scan cycle (not just at startup) so it
+    # reacts WITHIN the same day. Seeded with a safe no-op plan (mid-band
+    # risk, nothing paused) so the very first cycle before any computation
+    # still behaves sanely.
+    plan = {"risk_pct": (config.RISK_PCT_MIN + config.RISK_PCT_MAX) / 2, "paused_pairs": [], "daily_loss_limit_hit": False}
+    day_start_balance = state.get("day_start_balance")
+    day_start_date = state.get("day_start_date")
+    daily_limit_notified_date = None
 
     while True:
         try:
@@ -185,10 +219,30 @@ def main() -> None:
             # so nothing extra is needed here for that half.
 
             if tick % SCAN_EVERY_N_TICKS == 0:
+                today_str = now.strftime("%Y-%m-%d")
+                if day_start_date != today_str:
+                    account_now = mt5.account_info()
+                    if account_now is not None:
+                        day_start_balance = account_now.balance
+                        day_start_date = today_str
+                        state["day_start_balance"] = day_start_balance
+                        state["day_start_date"] = day_start_date
+                        daily_limit_notified_date = None  # allow the breaker notice to fire again on the new day
+
+                try:
+                    plan = planner.compute_plan(journal_data, day_start_balance or 0.0, now)
+                    firebase_push.push_insights(plan)
+                except Exception:
+                    print("Planner failed (falling back to last known plan):", traceback.format_exc())
+
+                if plan.get("daily_loss_limit_hit") and daily_limit_notified_date != today_str:
+                    notify(f"🛑 Daily loss limit hit ({plan.get('today_realized_pnl')} realized) — no new entries until tomorrow. Open positions are unaffected.")
+                    daily_limit_notified_date = today_str
+
                 ok_count = 0
                 for pair in PAIRS:
                     try:
-                        process_pair(pair, engine_state, seeded, now)
+                        process_pair(pair, engine_state, seeded, now, plan, journal_data)
                         ok_count += 1
                     except Exception:
                         print(f"Error processing {pair}:", traceback.format_exc())
@@ -198,13 +252,14 @@ def main() -> None:
                 # life every ~60s, not just the one-time startup line — this
                 # is the difference between "confirmed scanning" and "assumed
                 # scanning because nothing crashed."
-                print(f"[{now.isoformat(timespec='seconds')}] Scan cycle: {ok_count}/{len(PAIRS)} pairs OK, {open_count} open position(s), connected={broker.is_connected()}")
+                print(f"[{now.isoformat(timespec='seconds')}] Scan cycle: {ok_count}/{len(PAIRS)} pairs OK, {open_count} open position(s), "
+                      f"connected={broker.is_connected()}, risk={plan['risk_pct']*100:.1f}%, paused={plan.get('paused_pairs') or 'none'}")
 
             # Runs every ~1s regardless of the scan cadence above, so the
             # app's balance/equity/open-position numbers feel truly live even
             # though new M15 candles only matter once a minute.
             try:
-                firebase_push.sync_to_firebase()
+                firebase_push.sync_to_firebase(journal_data)
             except Exception:
                 print("Firebase sync failed:", traceback.format_exc())
 

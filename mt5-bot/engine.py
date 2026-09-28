@@ -190,13 +190,13 @@ def run_engine(pair: str, m15: list[dict], h1: list[dict], pip_size: float, seed
                     risk = max(entry - sl0, min_risk)
                     sl = entry - risk
                     tp = entry + risk * p["risk_reward"]
-                    signals.append({"time": m15[i]["time"], "dir": "BUY", "entry": entry, "sl": sl, "tp": tp})
+                    signals.append({"time": m15[i]["time"], "dir": "BUY", "entry": entry, "sl": sl, "tp": tp, "atr": atr[i]})
                 elif watch_dir == -1 and swing_high is not None:
                     sl0 = swing_high + p["sl_buffer_pips"] * pip_size
                     risk = max(sl0 - entry, min_risk)
                     sl = entry + risk
                     tp = entry - risk * p["risk_reward"]
-                    signals.append({"time": m15[i]["time"], "dir": "SELL", "entry": entry, "sl": sl, "tp": tp})
+                    signals.append({"time": m15[i]["time"], "dir": "SELL", "entry": entry, "sl": sl, "tp": tp, "atr": atr[i]})
                 watch_dir = 0
                 watch_bars_left = 0
             elif watch_bars_left <= 0:
