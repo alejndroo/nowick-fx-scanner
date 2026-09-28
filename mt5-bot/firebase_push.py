@@ -71,8 +71,15 @@ def sync_to_firebase(known_tickets: dict) -> dict:
         pair_display = p.symbol[:-len(config.SYMBOL_SUFFIX)] if config.SYMBOL_SUFFIX and p.symbol.endswith(config.SYMBOL_SUFFIX) else p.symbol
         risk_dist = abs(p.price_open - p.sl) if p.sl else None
         r_multiple = round(p.profit / (risk_dist * p.volume * 100000), 3) if risk_dist else 0.0
-        prior = known_tickets.get(p.ticket, {})
-        opened_at = prior.get("opened_at") or datetime.now(timezone.utc).isoformat(timespec="seconds")
+        prior = known_tickets.get(p.ticket)
+        if prior is not None:
+            opened_at = prior.get("opened_at")
+        else:
+            # Not in memory — likely a restart. Firebase already has this
+            # trade's real opened_at from before the restart (synced every
+            # ~10s), so recover it from there instead of resetting the clock.
+            existing = trades_ref.child(str(p.ticket)).get() or {}
+            opened_at = existing.get("opened_at") or datetime.now(timezone.utc).isoformat(timespec="seconds")
         trades_ref.child(str(p.ticket)).update({
             "pair": pair_display,
             "dir": "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL",

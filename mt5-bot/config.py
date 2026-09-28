@@ -12,7 +12,7 @@ SYMBOL_SUFFIX = ""
 
 # --- Risk ---
 RISK_PCT = 0.15          # fraction of account equity risked per trade (0.15 = 15%)
-MAX_OPEN_TRADES = 3      # bot will not open a new trade while this many of its own are open
+MAX_OPEN_TRADES = 6      # bot will not open a new trade while this many of its own are open (any mix of pairs)
 
 # Safety net matching the "no overnight holding" rule: force-close every
 # position this bot opened once UTC reaches this hour, even if SL/TP hasn't
